@@ -20,7 +20,7 @@ setup(
     packages=find_packages(exclude=('tests', 'docs')),
     entry_points={
         'console_scripts': [
-            'xcloud=xcloud.xcloud:main',
+            'xcloud=xcloud.cli:main',
         ],
     },
 )

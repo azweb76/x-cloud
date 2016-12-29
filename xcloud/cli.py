@@ -9,11 +9,11 @@ from fnmatch import fnmatch
 import yaml
 
 import utils
+
 from xcloud.cloud import Cloud
 from xcloud.cloudoptions import CloudOptions
 
 _log = logging.getLogger(__name__)
-
 
 
 def main():
@@ -79,7 +79,7 @@ def delete_all_cli(args):
     for options in all_options:
         option_name = options['name']
         if fnmatch(option_name, args.name):
-            cloud = Cloud.create(options)
+            cloud = cloud.Cloud.create(options)
             cloud.delete_all()
 
 
