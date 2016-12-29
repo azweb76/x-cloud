@@ -20,7 +20,7 @@ setup(
     packages=['xcloud'],
     entry_points={
         'console_scripts': [
-            'xcloud=xcloud.xcloud:main',
+            'xcloud=xcloud:main',
         ],
     },
 )
