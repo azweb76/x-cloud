@@ -9,7 +9,7 @@ setup(
         'glob2',
         'python-keystoneclient',
         'python-neutronclient',
-        'python-novaclient', 'keystoneclient',
+        'python-novaclient',
     ],
     author = "Dan Clayton",
     author_email = "dan@azwebmaster.com",
