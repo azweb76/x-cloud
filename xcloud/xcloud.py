@@ -9,8 +9,8 @@ from fnmatch import fnmatch
 import yaml
 
 import utils
-
-import cloudoptions.CloudOptions
+from xcloud.cloud import Cloud
+from xcloud.cloudoptions import CloudOptions
 
 _log = logging.getLogger(__name__)
 
