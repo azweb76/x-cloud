@@ -18,11 +18,11 @@ _log = logging.getLogger(__name__)
 
 def main():
     try:
-        options = {}
-        config_file = os.path.expanduser('~/.xcloud')
-        if os.path.exists(config_file):
-            with open(config_file, 'r') as fhd:
-                options = yaml.load(fhd)
+        # options = {}
+        # config_file = os.path.expanduser('~/.xcloud')
+        # if os.path.exists(config_file):
+        #     with open(config_file, 'r') as fhd:
+        #         options = yaml.load(fhd)
 
         parser = argparse.ArgumentParser(description='Provision servers in openstack.')
 
@@ -34,11 +34,9 @@ def main():
             choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
             help='optional. Set the log level.')
 
-        # parser.add_argument('-c', '--config', default='~/.xcloud', required=True, help='x-cloud config file used to '
-        #                     'store openstack information')
-        parser.add_argument('-u', '--username', default=os.environ.get('XCLOUD_USERNAME', None),
+        parser.add_argument('-u', '--username', default=os.environ.get('OS_USERNAME', None),
                             help='username to access openstack')
-        parser.add_argument('-p', '--password', default=os.environ.get('XCLOUD_PASSWORD', None),
+        parser.add_argument('-p', '--password', default=os.environ.get('OS_PASSWORD', None),
                             help='password to access openstack')
         parser.add_argument('-f', '--file', default=None, required=True, help='provision manifest file')
 
