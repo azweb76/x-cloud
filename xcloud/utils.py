@@ -38,7 +38,7 @@ def render(template_text, **kwargs):
     env = Environment(loader=loader)
     template = env.get_template('template')
 
-    return template.render(env=os.environ, **kwargs)
+    return template.render(**kwargs)
 
 
 def wait_for(fn, *args, **kwargs):
@@ -70,7 +70,7 @@ def retry(fn, *args, **kwargs):
             time.sleep(10)
 
 
-def ssh(server, cmd, user=None, stdout=True, raise_error=True, sudo=False):
+def ssh(server, cmd, user=None, stdout=True, raise_error=True, sudo=False, exit_on_error=False):
     cmd_array = ['ssh', '-T', '%s@%s' % (user, server),
                 '-oPreferredAuthentications=publickey', '-oStrictHostKeyChecking=no']
     if stdout:
@@ -78,11 +78,14 @@ def ssh(server, cmd, user=None, stdout=True, raise_error=True, sudo=False):
     else:
         FNULL = open(os.devnull, 'w')
         p = subprocess.Popen(cmd_array, stdin=subprocess.PIPE, stdout=FNULL, stderr=FNULL)
+    exit_cmd = ''
+    if exit_on_error:
+        exit_cmd = 'set -ae\n'
     if sudo:
-        cmd = 'sudo bash <<-\'SUDO_EOF\'\n%s\nSUDO_EOF' % cmd
+        cmd = 'sudo bash <<-\'SUDO_EOF\'\n%s%s\nSUDO_EOF' % (exit_cmd, cmd)
         p.communicate(cmd)
     else:
-        p.communicate(cmd)
+        p.communicate(exit_cmd + cmd)
     rc = p.returncode
     if raise_error and rc != 0:
         raise Exception('unable to run ssh command on %s [exitcode=%s]' % (server, rc))

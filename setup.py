@@ -10,6 +10,7 @@ setup(
         'python-keystoneclient',
         'python-neutronclient',
         'python-novaclient',
+        'git+https://github.com/azweb76/x-crypto'
     ],
     author="Dan Clayton",
     author_email="dan@azwebmaster.com",
