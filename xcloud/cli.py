@@ -72,6 +72,8 @@ def main():
         parser_a.add_argument('--max-age', default='9999d', type=utils.tdelta, help='max age to rebuild servers')
         parser_a.add_argument('--server-name', default='*', type=str, help='name of servers to rebuild')
         parser_a.add_argument('--threads', default=8, type=int, help='name of servers to run in parallel')
+        parser_a.add_argument('--stdout', default=False, action='store_true', help='print stdout for stdin script')
+        parser_a.add_argument('--sudo', default=False, action='store_true', help='run stdin script as sudo')
         parser_a.add_argument('script', default=None, type=str, help='name of the script to run')
         parser_a.set_defaults(func=run_cli)
 
@@ -145,7 +147,7 @@ def list_cli(args):
             for server in servers:
                 print '  %s %s %s %s %s' % (server.fqdn.ljust(30), server.fixed_ip.ljust(15),
                                       server.metadata['floating_ip'].ljust(15),
-                                      server.created.ljust(21),
+                                            ('%s' % server.created).ljust(21),
                                          flavors[server.flavor['id']].ljust(20))
             print ''
 

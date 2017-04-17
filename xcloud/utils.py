@@ -12,6 +12,13 @@ from jinja2 import Environment
 log = logging.getLogger(__name__)
 
 
+class AttributeDict(dict):
+    def __init__(self, d):
+        for x in d:
+            self.__setitem__(x, d[x])
+            setattr(self, x, d[x])
+
+
 def tdelta(s):
     keys = ["weeks", "days", "hours", "minutes", "seconds"]
     regex = "".join(["((?P<%s>\d+)%s ?)?" % (k, k[0]) for k in keys])
@@ -101,3 +108,22 @@ def extend(d, u):
         else:
             o[k] = u[k]
     return o
+
+def cat_file(path, data):
+    if isinstance(data, collections.Mapping):
+        d = []
+        for k in data:
+            v = data[k]
+            if isinstance(v, str):
+                d.append('%s="%s"' % (k, v))
+            else:
+                d.append('%s=%s' % (k, v))
+        content = '\n'.join(d)
+    else:
+        content = data
+
+    return """
+cat <<-'EOF' > {path}
+{content}
+EOF
+""".format(content=content, path=path)
