@@ -3,7 +3,7 @@ import yaml
 import os
 import logging
 
-from xcrypto import xcrypto
+#from xcrypto import xcrypto
 from xcloud import utils
 
 log = logging.getLogger(__name__)
@@ -15,12 +15,18 @@ class YamlLoader(yaml.Loader):
 
         super(YamlLoader, self).__init__(stream)
 
-    def encrypted(self, node):
-        value = str.strip(self.construct_scalar(node).encode('ascii', 'ignore'), '\n')
-        return xcrypto.decrypt(value, private_key='~/.ssh/pnc-cicd')
-
     def include(self, node):
-        filename = os.path.join(self._root, self.construct_scalar(node))
+        return self._include(node, self._root)
+
+    def sysfile(self, node):
+        return self._include(node, os.environ.get('SYS_PATH', self._root))
+
+    def syspath(self, node):
+        base_path = os.environ.get('SYS_PATH', self._root)
+        return os.path.join(base_path, self.construct_scalar(node))
+
+    def _include(self, node, base_path):
+        filename = os.path.join(base_path, self.construct_scalar(node))
 
         with open(filename, 'r') as fhd:
             y = fhd.read()
@@ -40,8 +46,10 @@ class YamlLoader(yaml.Loader):
         return filename.encode('ascii', 'ignore')
 
 
-YamlLoader.add_constructor('!encrypted', YamlLoader.encrypted)
+#YamlLoader.add_constructor('!encrypted', YamlLoader.encrypted)
 YamlLoader.add_constructor('!file', YamlLoader.include)
+YamlLoader.add_constructor('!sysfile', YamlLoader.sysfile)
+YamlLoader.add_constructor('!syspath', YamlLoader.syspath)
 YamlLoader.add_constructor('!yaml', YamlLoader.load)
 YamlLoader.add_constructor('!resolve', YamlLoader.resolve_path)
 
@@ -60,7 +68,7 @@ class CloudOptions(dict):
         defaults = region.get('defaults', {})
         clusters = region.get('clusters', [])
         all_files = region.get('files', [])
-        all_cloud_init = region.get('cloud_init', '')
+        all_cloud_init = region.get('cloud_init', [])
 
         env = region.get('env', {})
 
@@ -86,7 +94,7 @@ class CloudOptions(dict):
             cluster = utils.extend(defaults, cluster)
 
             cluster['files'] = all_files + cluster.get('files', [])
-            cluster['cloud_init'] = all_cloud_init + '\n' + cluster.get('cloud_init', '')
+            cluster['cloud_init'] = all_cloud_init + cluster.get('cloud_init', [])
             cluster['scripts'] = dict(region_scripts, **cluster.get('scripts', {}))
             cluster['env'] = dict(env, **cluster.get('env', {}))
 

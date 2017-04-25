@@ -7,7 +7,7 @@ import time
 from datetime import timedelta
 
 from jinja2 import DictLoader
-from jinja2 import Environment
+from jinja2 import Environment, is_undefined
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +35,13 @@ def resolve_path(p, base_path):
         return os.path.join(base_path, p)
 
 
+def arg_filter(value, arg_name):
+    if is_undefined(value):
+        return ''
+
+    return '%s %s' % (arg_name, str(value))
+
+
 def render(template_text, **kwargs):
     """Used to render a Jinja template."""
 
@@ -43,6 +50,7 @@ def render(template_text, **kwargs):
     })
 
     env = Environment(loader=loader)
+    env.filters['arg'] = arg_filter
     template = env.get_template('template')
 
     return template.render(**kwargs)
@@ -54,7 +62,7 @@ def wait_for(fn, *args, **kwargs):
         v = fn(*args, **kwargs)
         if v is None:
             if tries > 15:
-                raise
+                raise Exception('wait failed, tries exceeded')
             tries += 1
 
             log.info('waiting for %s...' % fn.__name__)
@@ -67,7 +75,7 @@ def retry(fn, *args, **kwargs):
         try:
             return fn(*args, **kwargs)
         except KeyboardInterrupt:
-            exit(1)
+            raise
         except:
             if tries > 5:
                 raise
@@ -105,9 +113,12 @@ def extend(d, u):
         if isinstance(v, collections.Mapping):
             r = extend(o.get(k, {}), v)
             o[k] = r
+        elif isinstance(v, list):
+            o[k] = o.get(k, []) + v
         else:
             o[k] = u[k]
     return o
+
 
 def cat_file(path, data):
     if isinstance(data, collections.Mapping):

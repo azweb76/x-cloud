@@ -4,3 +4,4 @@ glob2
 python-keystoneclient
 python-neutronclient
 python-novaclient
+requests

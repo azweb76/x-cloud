@@ -6,6 +6,7 @@ import logging
 import os
 from fnmatch import fnmatch
 
+import time
 import yaml
 
 import utils
@@ -13,17 +14,11 @@ import utils
 from xcloud.cloud import Cloud
 from xcloud.cloudoptions import CloudOptions
 
-_log = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 
 def main():
     try:
-        # options = {}
-        # config_file = os.path.expanduser('~/.xcloud')
-        # if os.path.exists(config_file):
-        #     with open(config_file, 'r') as fhd:
-        #         options = yaml.load(fhd)
-
         parser = argparse.ArgumentParser(description='Provision servers in openstack.')
 
         parser.add_argument(
@@ -39,13 +34,14 @@ def main():
         parser.add_argument('-p', '--password', default=os.environ.get('OS_PASSWORD', None),
                             help='password to access openstack')
         parser.add_argument('-f', '--file', default=None, required=True, help='provision manifest file')
-        parser.add_argument('--crypto-key', default=os.environ.get('XCRYPTO_KEY', None), required=False,
-                            help='key used to decrypt !encrypted tags in config')
+        parser.add_argument('--syspath', default=os.getcwd(), help='path used to resolve syspath, sysfile YAML tags')
+        # parser.add_argument('--crypto-key', default=os.environ.get('XCRYPTO_KEY', None), required=False,
+        #                     help='key used to decrypt !encrypted tags in config')
 
         subparsers = parser.add_subparsers(help='actions')
 
         parser_a = subparsers.add_parser('scale', help='resize servers')
-        parser_a.add_argument('-w', '--watch', default=False, action='store_true', help='watch the servers')
+        parser_a.add_argument('-w', '--watch', default=None, type=utils.tdelta, help='interval to watch for changes')
         parser_a.add_argument('-r', '--replicas', default=None, type=int, help='number of servers to scale to')
         parser_a.add_argument('--rebuild', default=False, action='store_true', help='rebuild the servers')
         parser_a.add_argument('-p', '--parallel', default=False, action='store_true', help='rebuild all the servers in parallel')
@@ -82,6 +78,7 @@ def main():
         parser_a.set_defaults(func=list_cli)
 
         args = parser.parse_args()
+        os.environ['SYS_PATH'] = args.syspath
 
         logging.getLogger('requests').setLevel(logging.ERROR)
         fmt = "[%(relativeCreated)-8d] %(levelname)s %(module)s: %(message)s"
@@ -93,11 +90,24 @@ def main():
 
 def scale_cli(args):
     all_options = CloudOptions.create_from_file(args.file, args)
-    for options in all_options:
-        option_name = options['name']
-        if fnmatch(option_name, args.cluster):
-            cloud = Cloud.create(options)
-            cloud.scale(args)
+    while True:
+        try:
+            for options in all_options:
+                option_name = options['name']
+                if fnmatch(option_name, args.cluster):
+                    cloud = Cloud.create(options)
+                    cloud.scale(args)
+            if args.watch is None:
+                break
+            time.sleep(args.watch.total_seconds())
+        except KeyboardInterrupt:
+            raise
+        except:
+            if args.watch is None:
+                raise
+            else:
+                log.exception('error while attempting to scale, retrying in 10s')
+                time.sleep(10)
 
 
 def update_cli(args):

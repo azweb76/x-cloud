@@ -282,7 +282,8 @@ class Cloud(object):
         return server_naming['format'].format(code=md5_hash, **server_naming)
 
     def get_userdata(self, server_info):
-        cloud_init = utils.render(self._options.get('cloud_init', ''), server=server_info,
+        cloud_init_template = '\n'.join(self._options.get('cloud_init', []))
+        cloud_init = utils.render(cloud_init_template, server=server_info,
                                   env=self._options['env'], options=self._options, cloud=self)
 
         xcloud_config = self.get_cloud_config(server_info)
@@ -430,13 +431,6 @@ fi
                     raise RuntimeError('missing source or content in file')
 
         return files
-
-    # def wait_for_attributes(self, node, attribute_name):
-    #     try:
-    #         getattr(node, attribute_name)
-    #         return node
-    #     except:
-    #         return self.get_server(node.id)
 
     def find_availability_zone(self, servers):
         options = self._options
@@ -608,11 +602,14 @@ fi
 
         for image in images:
             if re.match(image_expr, image.name):
-                if image.metadata.get('recommended', 'false') == 'true':
+                if bool(image.metadata.get('recommended', 'false')):
                     created = time.strptime(image.created, "%Y-%m-%dT%H:%M:%SZ")
                     if newest_image is None or created > newest_created:
                         newest_image = image
                         newest_created = created
+
+        if newest_image is None:
+            raise RuntimeError('unable to find latest image (%s)' % image_expr)
 
         self._image = newest_image
         return newest_image
@@ -633,17 +630,7 @@ fi
             self.execute_scripts(update_scripts, self.get_server_info(server), is_first=False)
 
     def scale(self, args):
-        if args.watch is True:
-            while True:
-                try:
-                    self._scale(args)
-                except KeyboardInterrupt:
-                    exit(1)
-                except:
-                    log.warning('failed to scale, retrying in 5s')
-                time.sleep(5)
-        else:
-            self._scale(args)
+        self._scale(args)
 
     @staticmethod
     def get_server_age(server):
@@ -845,7 +832,8 @@ fi
             self.finalize_server(server, is_first=is_first)
 
         for server in finalize_servers:
-            self.validate_server(server, is_first=is_first)
+            server_info = self.get_server_info(server)
+            self.validate_server(server_info, is_first=is_first)
             log.info('server %s is now active...', server.name)
 
     def wait_for_deleted(self, deleted_servers):
@@ -890,8 +878,11 @@ fi
             return args.replicas
 
         scaling = self._options.get('scaling', {})
-        if current_size == 0:
+        if 'replicas' in scaling:
+            return scaling['replicas']
+        elif current_size == 0:
             return scaling.get('initial_size', 1)
+
         return current_size
 
     def wait_for_cloudready(self, server_info, is_first=False):
