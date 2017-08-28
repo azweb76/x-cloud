@@ -7,9 +7,9 @@ setup(
         'PyYaml',
         'jinja2',
         'glob2',
-        'python-keystoneclient',
-        'python-neutronclient',
-        'python-novaclient',
+        'python-keystoneclient==3.10.0',
+        'python-neutronclient==6.2.0',
+        'python-novaclient==7.1.0',
         'requests==2.10.0',
         'babel==2.3.4'
     ],

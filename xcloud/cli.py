@@ -19,7 +19,8 @@ log = logging.getLogger(__name__)
 
 def main():
     try:
-        parser = argparse.ArgumentParser(description='Provision servers in openstack.')
+        parser = argparse.ArgumentParser(
+            description='Provision servers in openstack.')
 
         parser.add_argument(
             '-l',
@@ -33,52 +34,78 @@ def main():
                             help='username to access openstack')
         parser.add_argument('-p', '--password', default=os.environ.get('OS_PASSWORD', None),
                             help='password to access openstack')
-        parser.add_argument('-f', '--file', default=None, required=True, help='provision manifest file')
-        parser.add_argument('--syspath', default=os.getcwd(), help='path used to resolve syspath, sysfile YAML tags')
-        # parser.add_argument('--crypto-key', default=os.environ.get('XCRYPTO_KEY', None), required=False,
-        #                     help='key used to decrypt !encrypted tags in config')
+        parser.add_argument('-f', '--file', default=None,
+                            required=True, help='provision manifest file')
+        parser.add_argument('--syspath', default=os.getcwd(),
+                            help='path used to resolve syspath, sysfile YAML tags')
 
         subparsers = parser.add_subparsers(help='actions')
 
         parser_a = subparsers.add_parser('scale', help='resize servers')
-        parser_a.add_argument('-w', '--watch', default=None, type=utils.tdelta, help='interval to watch for changes')
-        parser_a.add_argument('-r', '--replicas', default=None, type=int, help='number of servers to scale to')
-        parser_a.add_argument('--rebuild', default=False, action='store_true', help='rebuild the servers')
-        parser_a.add_argument('-p', '--parallel', default=False, action='store_true', help='rebuild all the servers in parallel')
-        parser_a.add_argument('--min-age', default='0s', type=utils.tdelta, help='minimum age to rebuild servers')
-        parser_a.add_argument('--max-age', default='9999d', type=utils.tdelta, help='max age to rebuild servers')
-        parser_a.add_argument('--server-name', default='*', type=str, help='name of servers to rebuild')
-        parser_a.add_argument('--force', action='store_true', help='force and action such as delete')
+        parser_a.add_argument('-w', '--watch', default=None,
+                              type=utils.tdelta, help='interval to watch for changes')
+        parser_a.add_argument('-r', '--replicas', default=None,
+                              type=int, help='number of servers to scale to')
+        parser_a.add_argument('--rebuild', default=False,
+                              action='store_true', help='rebuild the servers')
+        parser_a.add_argument('-p', '--parallel', default=False,
+                              action='store_true', help='rebuild all the servers in parallel')
+        parser_a.add_argument('--min-age', default='0s',
+                              type=utils.tdelta, help='minimum age to rebuild servers')
+        parser_a.add_argument('--max-age', default='9999d',
+                              type=utils.tdelta, help='max age to rebuild servers')
+        parser_a.add_argument('--server-name', default='*',
+                              type=str, help='name of servers to rebuild')
+        parser_a.add_argument('--force', action='store_true',
+                              help='force and action such as delete')
         parser_a.add_argument('-v', '--validate', default=False, action='store_true',
                               help='validate the servers before scale')
-        parser_a.add_argument('-c', '--cluster', default='*', type=str, help='name of cluster')
+        parser_a.add_argument('-c', '--cluster', default='*',
+                              type=str, help='name of cluster')
         parser_a.set_defaults(func=scale_cli)
 
         parser_a = subparsers.add_parser('update', help='update servers')
-        parser_a.add_argument('-c', '--cluster', default='*', type=str, help='name of cluster')
+        parser_a.add_argument('-c', '--cluster', default='*',
+                              type=str, help='name of cluster')
+        parser_a.add_argument('--network', action='store_true',
+                              help='update network config')
         parser_a.set_defaults(func=update_cli)
 
         parser_a = subparsers.add_parser('reboot', help='reboot servers')
-        parser_a.add_argument('-c', '--cluster', default='*', type=str, help='name of cluster')
+        parser_a.add_argument('-c', '--cluster', default='*',
+                              type=str, help='name of cluster')
         parser_a.set_defaults(func=reboot_cli)
 
         parser_a = subparsers.add_parser('run', help='run scripts')
-        parser_a.add_argument('-c', '--cluster', default='*', type=str, help='name of cluster')
-        parser_a.add_argument('--min-age', default='0s', type=utils.tdelta, help='minimum age to rebuild servers')
-        parser_a.add_argument('--max-age', default='9999d', type=utils.tdelta, help='max age to rebuild servers')
-        parser_a.add_argument('--server-name', default='*', type=str, help='name of servers to rebuild')
-        parser_a.add_argument('--threads', default=8, type=int, help='name of servers to run in parallel')
-        parser_a.add_argument('--stdout', default=False, action='store_true', help='print stdout for stdin script')
-        parser_a.add_argument('--sudo', default=False, action='store_true', help='run stdin script as sudo')
-        parser_a.add_argument('script', default=None, type=str, help='name of the script to run')
+        parser_a.add_argument('-c', '--cluster', default='*',
+                              type=str, help='name of cluster')
+        parser_a.add_argument('--min-age', default='0s',
+                              type=utils.tdelta, help='minimum age to rebuild servers')
+        parser_a.add_argument('--max-age', default='9999d',
+                              type=utils.tdelta, help='max age to rebuild servers')
+        parser_a.add_argument('--server-name', default='*',
+                              type=str, help='name of servers to rebuild')
+        parser_a.add_argument('--batch', default=8, type=int,
+                              help='number of servers to run in parallel')
+        parser_a.add_argument('--stdout', default=False,
+                              action='store_true', help='print stdout for stdin script')
+        parser_a.add_argument(
+            '--sudo', default=False, action='store_true', help='run stdin script as sudo')
+        parser_a.add_argument('script', default=None,
+                              type=str, help='name of the script to run')
         parser_a.set_defaults(func=run_cli)
 
         parser_a = subparsers.add_parser('list', help='list all servers')
-        parser_a.add_argument('-c', '--cluster', default='*', type=str, help='name of cluster')
+        parser_a.add_argument('-c', '--cluster', default='*',
+                              type=str, help='name of cluster')
+        parser_a.add_argument('-s', '--summary', help='summarize the servers',
+                              action='store_true')
         parser_a.set_defaults(func=list_cli)
 
+        parser_a = subparsers.add_parser('setup', help='setup the clusters')
+        parser_a.set_defaults(func=setup_cli)
+
         args = parser.parse_args()
-        os.environ['SYS_PATH'] = args.syspath
 
         logging.getLogger('requests').setLevel(logging.ERROR)
         fmt = "[%(relativeCreated)-8d] %(levelname)s %(module)s: %(message)s"
@@ -87,6 +114,7 @@ def main():
         args.func(args)
     except KeyboardInterrupt:
         exit(0)
+
 
 def scale_cli(args):
     all_options = CloudOptions.create_from_file(args.file, args)
@@ -106,7 +134,8 @@ def scale_cli(args):
             if args.watch is None:
                 raise
             else:
-                log.exception('error while attempting to scale, retrying in 10s')
+                log.exception(
+                    'error while attempting to scale, retrying in 10s')
                 time.sleep(10)
 
 
@@ -130,11 +159,21 @@ def reboot_cli(args):
 
 def run_cli(args):
     all_options = CloudOptions.create_from_file(args.file, args)
-    for options in all_options:
-        option_name = options['name']
-        if fnmatch(option_name, args.cluster):
-            cloud = Cloud.create(options)
-            cloud.run_scripts(args)
+    try:
+        for options in all_options:
+            option_name = options['name']
+            if fnmatch(option_name, args.cluster):
+                cloud = Cloud.create(options)
+                cloud.run_scripts(args)
+    except KeyboardInterrupt:
+        exit(1)
+
+
+def setup_cli(args):
+    options = CloudOptions.create_from_defaults(args.file, args)
+    cloud = Cloud.create(options)
+    
+    cloud.update_security_groups()
 
 
 def list_cli(args):
@@ -151,14 +190,33 @@ def list_cli(args):
 
             print 'CLUSTER: %s' % option_name
             print ''
-            print '  %s %s %s %s %s' % ('fqdn'.ljust(30), 'ip'.ljust(15), 'floater'.ljust(15), 'created'.ljust(21),
-                                     'size'.ljust(20))
-            print '  %s %s %s %s %s' % ('-' * 30, '-' * 15, '-' * 15, '-' * 21, '-' * 20)
-            for server in servers:
-                print '  %s %s %s %s %s' % (server.fqdn.ljust(30), server.fixed_ip.ljust(15),
-                                      server.metadata['floating_ip'].ljust(15),
-                                            ('%s' % server.created).ljust(21),
-                                         flavors[server.flavor['id']].ljust(20))
+
+            by_size = {}
+            if args.summary:
+                for server in servers:
+                    size = flavors[server.flavor['id']]
+                    if size not in by_size:
+                        by_size[size] = 1
+                    else:
+                        by_size[size] += 1
+                for size in by_size:
+                    print '  %s: %s' % (size, by_size[size])
+            else:
+                print '  %s %s %s %s %s %s %s %s' % ('fqdn'.ljust(30), 'ip'.ljust(15), 'floater'.ljust(15), 'created'.ljust(21),
+                                            'size'.ljust(10), 'sensu', 'validated_on'.ljust(26), 'patched_on'.ljust(26))
+                print '  %s %s %s %s %s %s %s %s' % ('-' * 30, '-' * 15, '-' * 15, '-' * 21, '-' * 10, '-' * 5, 
+                    '-' * 26, '-' * 26)
+                for server in servers:
+                    info = {}
+                    cloud._plugins.on_describe(server, info)
+                    print '  %s %s %s %s %s %s %s %s' % (server.fqdn.ljust(30), server.fixed_ip.ljust(15),
+                                                server.metadata[
+                                                    'floating_ip'].ljust(15),
+                                                ('%s' % server.created).ljust(21),
+                                                flavors[server.flavor['id']].ljust(10),
+                                                info.get('has_sensu', False),
+                                                str(server.metadata.get('validate_dt', None)).ljust(26),
+                                                str(server.metadata.get('patch_dt', None)).ljust(26))
             print ''
 
 

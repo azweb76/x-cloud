@@ -4,6 +4,8 @@ import os
 import re
 import subprocess
 import time
+import yaml
+import sys
 from datetime import timedelta
 
 from jinja2 import DictLoader
@@ -35,6 +37,15 @@ def resolve_path(p, base_path):
         return os.path.join(base_path, p)
 
 
+def read_file(self, p):
+    with open(p, 'r') as fhd:
+        return fhd.read()
+
+
+def yaml_filter(value, pretty=False):
+    return yaml.dump(value, default_flow_style=not pretty)
+
+
 def arg_filter(value, arg_name):
     if is_undefined(value):
         return ''
@@ -51,9 +62,10 @@ def render(template_text, **kwargs):
 
     env = Environment(loader=loader)
     env.filters['arg'] = arg_filter
+    env.filters['yaml'] = yaml_filter
     template = env.get_template('template')
 
-    return template.render(**kwargs)
+    return template.render(utils=sys.modules[__name__], **kwargs)
 
 
 def wait_for(fn, *args, **kwargs):
@@ -70,6 +82,10 @@ def wait_for(fn, *args, **kwargs):
 
 
 def retry(fn, *args, **kwargs):
+    return retry2(fn, 5, *args, **kwargs)
+
+
+def retry2(fn, max_attempts, *args, **kwargs):
     tries = 0
     while True:
         try:
@@ -77,15 +93,14 @@ def retry(fn, *args, **kwargs):
         except KeyboardInterrupt:
             raise
         except:
-            if tries > 5:
+            if tries > max_attempts:
                 raise
             tries += 1
 
             log.exception('failed to call %s, retrying in 10s...', fn.__name__)
             time.sleep(10)
 
-
-def ssh(server, cmd, user=None, stdout=True, raise_error=True, sudo=False, exit_on_error=False):
+def ssh(server, cmd, user=None, stdout=True, raise_error=True, sudo=False, exit_on_error=False, echo_command=True):
     cmd_array = ['ssh', '-T', '%s@%s' % (user, server),
                 '-oPreferredAuthentications=publickey', '-oStrictHostKeyChecking=no']
     if stdout:
@@ -94,10 +109,13 @@ def ssh(server, cmd, user=None, stdout=True, raise_error=True, sudo=False, exit_
         FNULL = open(os.devnull, 'w')
         p = subprocess.Popen(cmd_array, stdin=subprocess.PIPE, stdout=FNULL, stderr=FNULL)
     exit_cmd = ''
+    echo_cmd = '\nset -x'
+    if not echo_command:
+        echo_cmd = ''
     if exit_on_error:
         exit_cmd = 'set -ae\n'
     if sudo:
-        cmd = 'sudo bash <<-\'SUDO_EOF\'\n%s%s\nSUDO_EOF' % (exit_cmd, cmd)
+        cmd = 'sudo bash <<-\'SUDO_EOF\'%s\n%s%s\nSUDO_EOF' % (echo_cmd, exit_cmd, cmd)
         p.communicate(cmd)
     else:
         p.communicate(exit_cmd + cmd)
@@ -114,7 +132,8 @@ def extend(d, u):
             r = extend(o.get(k, {}), v)
             o[k] = r
         elif isinstance(v, list):
-            o[k] = o.get(k, []) + v
+            #o[k] = o.get(k, []) + v
+            o[k] = v
         else:
             o[k] = u[k]
     return o

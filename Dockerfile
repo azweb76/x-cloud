@@ -8,6 +8,6 @@ WORKDIR /app/
 
 COPY ./ ./
 # RUN yum clean all
-RUN yum install -y gcc python2-devel && \
+RUN yum install -y gcc python2-devel openssh-clients && \
    pip install ./ && \
    yum remove -y gcc python2-devel && yum clean all

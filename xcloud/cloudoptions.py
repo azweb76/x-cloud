@@ -57,20 +57,45 @@ YamlLoader.add_constructor('!resolve', YamlLoader.resolve_path)
 class CloudOptions(dict):
 
     @staticmethod
-    def create_from_file(filename, args):
+    def create_from_defaults(filename, args):
 
         all_options = []
+        os.environ['SYS_PATH'] = args.syspath
 
         base_path = os.path.dirname(filename)
         with open(filename, 'r') as fhd:
             region = yaml.load(fhd, YamlLoader)
 
         defaults = region.get('defaults', {})
-        clusters = region.get('clusters', [])
+
+        defaults['security_groups'] = region.get('security_groups', {})
+
+        if args.username:
+            defaults['username'] = args.username
+
+        if args.password:
+            defaults['password'] = args.password
+
+        return defaults
+
+    @staticmethod
+    def create_from_file(filename, args):
+
+        all_options = []
+        os.environ['SYS_PATH'] = args.syspath
+
+        base_path = os.path.dirname(filename)
+        with open(filename, 'r') as fhd:
+            region = yaml.load(fhd, YamlLoader)
+
+        defaults = region.get('defaults', {})
         all_files = region.get('files', [])
         all_cloud_init = region.get('cloud_init', [])
+        clusters = region.get('clusters', [])
+        all_security_groups = region.get('security_groups', {})
 
         env = region.get('env', {})
+        configs = region.get('configs', {})
 
         for idx in range(0, len(clusters)):
             cluster = clusters[idx]
@@ -97,6 +122,8 @@ class CloudOptions(dict):
             cluster['cloud_init'] = all_cloud_init + cluster.get('cloud_init', [])
             cluster['scripts'] = dict(region_scripts, **cluster.get('scripts', {}))
             cluster['env'] = dict(env, **cluster.get('env', {}))
+            cluster['configs'] = dict(configs, **cluster.get('configs', {}))
+            cluster['security_groups'] = all_security_groups
 
             options = CloudOptions(cluster)
 

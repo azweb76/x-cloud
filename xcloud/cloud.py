@@ -10,11 +10,15 @@ from fnmatch import fnmatch
 import multiprocessing as mp
 from copy_reg import pickle
 from multiprocessing.pool import ApplyResult
+import signal
 from types import MethodType
 
 import keystoneauth1
 import neutronclient.neutron.client
-import novaclient.client
+import glanceclient
+import novaclient.v2.client
+import openstackclient
+from fnmatch import fnmatch
 
 import datetime
 import time
@@ -23,8 +27,10 @@ import signal
 import yaml
 from keystoneclient.auth.identity import v2
 from novaclient.exceptions import NotFound
+from openstack import connection, profile
 
 from xcloud import utils
+from xcloud.plugins import PluginManager
 
 log = logging.getLogger(__name__)
 DIRNAME = os.path.dirname(__file__)
@@ -53,7 +59,9 @@ def _unpickle_method(func_name, obj, cls):
 
 pickle(MethodType, _pickle_method, _unpickle_method)
 
+
 class Cloud(object):
+
     def __init__(self, options):
         self._options = options
 
@@ -65,6 +73,10 @@ class Cloud(object):
         self._image = None
         self._pool_ips = None
         self._find_servers_cache = {}
+        self._networks = {}
+        self._security_groups = {}
+
+        self._plugins = PluginManager(options)
 
         # self._osClient = Cloud.create_openstack_client(options['cloud'])
 
@@ -72,25 +84,8 @@ class Cloud(object):
     def create(options):
         return Cloud(options)
 
-    # @staticmethod
-    # def create_openstack_client(options):
-    #     from openstack import connection, profile
-    #     prof = profile.Profile()
-    #     prof.set_region(prof.ALL, 'phx3')
-    #     conn = connection.Connection(
-    #         profile=prof,
-    #         auth_url=options['url'],
-    #         username=options['username'],
-    #         password=options['password'],
-    #         project_name=options['project_name'],
-    #         user_domain_id='default',
-    #         project_domain_id='default'
-    #     )
-    #     return conn
-
     @staticmethod
     def construct_nova_client(options):
-
         timeout = options.get('timeout', 600)
         auth = v2.Password(auth_url=options['auth_url'],
                            username=options['username'],
@@ -105,6 +100,32 @@ class Cloud(object):
             session=keystoneauth1.session.Session(auth=auth, timeout=timeout))
 
         return nova_client, neutron_client
+    
+    @staticmethod
+    def construct_neutron_client(options):
+        timeout = options.get('timeout', 600)
+        auth = v2.Password(auth_url=options['auth_url'],
+                           username=options['username'],
+                           password=options['password'],
+                           tenant_name=options['project_name'])
+        neutron_client = neutronclient.neutron.client.Client(
+            '{}.0'.format(options['openstack_api_version']),
+            session=keystoneauth1.session.Session(auth=auth, timeout=timeout))
+
+        return neutron_client
+
+    @staticmethod
+    def construct_glance_client(options):
+        timeout = options.get('timeout', 600)
+        auth = v2.Password(auth_url=options['auth_url'],
+                           username=options['username'],
+                           password=options['password'],
+                           tenant_name=options['project_name'])
+        glance_client = glanceclient.Client(
+            options['openstack_api_version'],
+            session=keystoneauth1.session.Session(auth=auth, timeout=timeout), )
+
+        return glance_client
 
     def find_servers(self, role, cachable=False):
         """
@@ -113,7 +134,12 @@ class Cloud(object):
         role: role value stored in the role metadata field
         """
 
-        ns_role = '%s/%s' % (self._options.get('namespace', 'default'), role)
+        ns = self._options.get('namespace', None)
+        if ns:
+            ns_role = '%s/%s' % (ns, role)
+        else:
+            ns_role = role
+
         if cachable:
             if ns_role in self._find_servers_cache:
                 return self._find_servers_cache[ns_role]
@@ -122,12 +148,20 @@ class Cloud(object):
         ret = []
 
         log.info('locating servers (%s)...', ns_role)
-        servers = utils.retry(novaClient.servers.list)
+        servers = utils.retry(novaClient.servers.list, detailed=True)
 
+        # role_pattern = os.environ.get('ROLE_PATTERN', None)
         for server in servers:
-            if 'role' in server.metadata:
-                if server.metadata['role'] == ns_role:
-                    ret.append(self.get_server_info(server))
+            if role:
+            # if role_pattern:
+            #     if fnmatch(server.name, role_pattern):
+            #         ret.append(self.get_server_info(server))
+            # el
+                if 'role' in server.metadata:
+                    if server.metadata['role'] == ns_role:
+                        ret.append(self.get_server_info(server))
+            else:
+                ret.append(self.get_server_info(server))
 
         if cachable:
             self._find_servers_cache[ns_role] = ret
@@ -136,7 +170,8 @@ class Cloud(object):
 
     def _delete_server(self, server_id):
         try:
-            novaClient, neutronClient = Cloud.construct_nova_client(self._options)
+            novaClient, neutronClient = Cloud.construct_nova_client(
+                self._options)
             novaClient.servers.delete(server_id)
         except NotFound:
             pass
@@ -144,18 +179,28 @@ class Cloud(object):
     def pull_server(self, server_info):
         options = self._options
 
+        self._plugins.on_before_server_pulled(server_info)
+
         log.info('pulling server %s...' % server_info.name)
-        scripts = options.get('scripts', {}).get('cloud_pull', None)
+        scripts = options.get('scripts', {}).get('pull', None)
         self.execute_scripts(scripts, server_info)
 
-    def delete_server(self, server_info, skip_delete_scripts=False):
+    def delete_server(self, server_info, skip_delete_scripts=False,
+                      force=False):
         options = self._options
 
-        self.pull_server(server_info)
+        try:
+            self.pull_server(server_info)
 
-        if not skip_delete_scripts:
-            delete_scripts = options.get('scripts', {}).get('cloud_delete', None)
-            self.execute_scripts(delete_scripts, server_info)
+            if not skip_delete_scripts:
+                delete_scripts = options.get(
+                    'scripts', {}).get('delete', None)
+                self.execute_scripts(delete_scripts, server_info)
+        except:
+            if force:
+                log.exception('unable to delete server, forcing')
+            else:
+                raise
 
         log.info('deleting server %s...' % server_info.name)
         novaClient, neutronClient = Cloud.construct_nova_client(self._options)
@@ -214,17 +259,26 @@ class Cloud(object):
         utils.retry(neutronClient.update_port, port['id'],
                     {'port': {'allowed_address_pairs': address_pairs}})
 
+    def get_network_by_name(self, network_name):
+        if network_name in self._networks:
+            network = self._networks[network_name]
+        else:
+            novaClient, neutron_client = Cloud.construct_nova_client(self._options)
+            networks = neutron_client.list_networks()['networks']
+            for network in networks:
+                self._networks[network['name']] = network
+            network = self._networks[network_name]
+        return network
+
     def get_floating_ips(self, ip_pool):
-        if self._pool_ips:
-            return self._pool_ips
-
         novaClient, neutronClient = Cloud.construct_nova_client(self._options)
-        all_ips = utils.retry(novaClient.floating_ips.list)
-
+        floating_network_id = self.get_network_by_name(ip_pool)['id']
+        all_ips = utils.retry(neutronClient.list_floatingips, ip_pool)['floatingips']
         pool_ips = filter(
-            lambda x: x.instance_id is None and x.pool == ip_pool,
+            lambda x: x['port_id'] is None and x['floating_network_id'] == floating_network_id,
             all_ips)
-        self._pool_ips = pool_ips = map(lambda x: x.ip.encode('ascii', 'ignore'), pool_ips)
+        self._pool_ips = pool_ips = map(
+            lambda x: x['floating_ip_address'].encode('ascii', 'ignore'), pool_ips)
         return pool_ips
 
     def get_floating_ip_pool(self):
@@ -240,6 +294,10 @@ class Cloud(object):
                 return self.get_floating_ips(ip_pool['source']), ip_pool, ip_pools
 
         return None
+
+    def create_floating_ip(self, ip_pool):
+        network_id = self.get_network_by_name(ip_pool)
+        nova_client, neutron_client = Cloud.construct_nova_client(self._options)
 
     def get_floating_ip(self, pool_ips, ip_pool, ip_pools):
 
@@ -268,9 +326,10 @@ class Cloud(object):
             else:
                 ip_source = ip_pool['source']
 
-            novaClient, neutronClient = Cloud.construct_nova_client(self._options)
+            novaClient, neutronClient = Cloud.construct_nova_client(
+                self._options)
             log.info('creating a new floating IP (%s)...', ip_source)
-            ip = utils.retry(novaClient.floating_ips.create, ip_source)
+            ip = utils.retry(neutronClient.create_floatingip, ip_source)
             return ip.ip.encode('ascii', 'ignore')
 
     def format_server_naming(self, server_naming):
@@ -284,7 +343,7 @@ class Cloud(object):
     def get_userdata(self, server_info):
         cloud_init_template = '\n'.join(self._options.get('cloud_init', []))
         cloud_init = utils.render(cloud_init_template, server=server_info,
-                                  env=self._options['env'], options=self._options, cloud=self)
+                                  env=self._options['env'], options=self._options, cloud=self, configs=self._options['configs'])
 
         xcloud_config = self.get_cloud_config(server_info)
         script = """#!/usr/bin/env bash
@@ -292,7 +351,7 @@ SERVER_COUNT={server_count}
 
 (
 
-set -ae;
+set -xae;
 {xcloud_config}
 {cloud_init}
 
@@ -326,7 +385,8 @@ fi
         options = self._options
 
         timeout = utils.tdelta(options.get('%s_timeout' % command_name, '20m'))
-        warning_timeout = utils.tdelta(options.get('%s_warning' % command_name, '5m'))
+        warning_timeout = utils.tdelta(
+            options.get('%s_warning' % command_name, '5m'))
         start = datetime.datetime.now()
         log.info('waiting for %s (%s)...' % (command_name, server_ip))
 
@@ -370,15 +430,51 @@ fi
             print 'deleting servergroup %s...' % item.name
             utils.retry(novaClient.server_groups.delete, item.id)
 
+    def get_security_groups(self):
+        neutron_client = Cloud.construct_neutron_client(self._options)
+        groups = neutron_client.list_security_groups()['security_groups']
+
+        groups_by_name = {}
+        for group in groups:
+            groups_by_name[group['name']] = group
+
+        self._security_groups = groups_by_name
+        return groups_by_name
+
+    def create_or_get_security_group(self, group_name, neutronclient=None):
+        if neutronclient is None:
+            neutronclient = Cloud.construct_neutron_client(self._options)
+
+        security_groups = self._options['security_groups']
+        all_security_groups = self.get_security_groups()
+        if group_name not in all_security_groups:
+            if group_name == 'default':
+                raise RuntimeError('default security group not found')
+
+            group = neutronclient.create_security_group({
+                'security_group': {
+                    'name': group_name
+                }
+            })['security_group']
+
+            all_security_groups[group_name] = group
+
+            return group
+        else:
+            return all_security_groups[group_name]
+
+
     def create_or_get_server_group(self, server_info):
         options = self._options
         if 'server_group' in options:
             server_group = options['server_group']
-            group_name = '%s-%s' % (server_info['availability_zone'], options['name'])
+            group_name = '%s-%s' % (
+                server_info['availability_zone'], options['name'])
             policy = server_group['policy']
 
             # Search for a group
-            novaClient, neutronClient = Cloud.construct_nova_client(self._options)
+            novaClient, neutronClient = Cloud.construct_nova_client(
+                self._options)
             server_groups = utils.retry(novaClient.server_groups.list)
             for server_group in server_groups:
                 if group_name == server_group.name:
@@ -412,7 +508,7 @@ fi
         }
 
         cloud_yaml = yaml.dump(cloud, default_flow_style=False)
-        files['/opt/puppetlabs/facter/facts.d/cloud.yaml'] = cloud_yaml
+        files['/etc/xcloud/xcloud.yaml'] = cloud_yaml
 
         env = options['env']
         for f in options.get('files', []):
@@ -424,9 +520,13 @@ fi
                 elif 'content' in f:
                     files[f['name']] = f['content']
                 elif 'template' in f:
-                    files[f['name']] = utils.render(f['template'], cloud=self, server=server_info, env=env)
+                    files[f['name']] = utils.render(
+                        f['template'], cloud=self, server=server_info, env=env,
+                        configs=options['configs'])
                 elif 'env' in f:
                     files[f['name']] = env[f['env']]
+                elif 'config' in f:
+                    files[f['name']] = yaml.dump(options['configs'][f['config']])
                 else:
                     raise RuntimeError('missing source or content in file')
 
@@ -477,8 +577,8 @@ fi
                 preferred_zone = avail_zone
                 if zones_total > 0 and total_weight > 0:
                     preferred_pct = (preferred_zone[
-                                         'allocations'] / zones_total) - (preferred_zone['weight'] /
-                                                                          float(total_weight))
+                        'allocations'] / zones_total) - (preferred_zone['weight'] /
+                                                         float(total_weight))
         if not preferred_zone:
             raise Exception('error: unable to find zone')
         else:
@@ -506,7 +606,8 @@ fi
 
         novaClient, neutronClient = Cloud.construct_nova_client(self._options)
         image_id = self.get_image().id
-        server_name = self.format_server_naming(options.get('server_naming', {}))
+        server_name = self.format_server_naming(
+            options.get('server_naming', {}))
         user_data = self.get_userdata(server_info)
 
         security = options.get('security', {})
@@ -519,14 +620,15 @@ fi
         server_group = self.create_or_get_server_group(server_info)
         scheduler_hints = dict(group=server_group.id) if server_group else None
 
-        ns_role = '%s/%s' % (self._options.get('namespace', 'default'), options['name'])
+        ns_role = '%s/%s' % (self._options.get('namespace',
+                                               'default'), options['name'])
         os_meta = {
             'login_groups': ','.join(security.get('login_groups', [])),
             'login_users': ','.join(security.get('login_users', [])),
             'sudo_users': ','.join(security.get('sudo_users', [])),
             'sudo_groups': ','.join(security.get('sudo_groups', [])),
             'role': ns_role,
-            'floating_ip': server_info.get('floating_ip','') or '',
+            'floating_ip': server_info.get('floating_ip', '') or '',
         }
 
         if not options.get('spacewalk', True):
@@ -540,17 +642,43 @@ fi
 
         flavors = self.get_flavors()
         log.info('creating server %s on %s...', server_name, availability_zone)
-        server = utils.retry(novaClient.servers.create,
-                             server_name,
-                             image_id,
-                             flavors[options.get('instance_size', 'm1.small')],
-                             meta=os_meta,
-                             userdata=user_data,
-                             files=files,
-                             availability_zone=availability_zone,
-                             key_name=security['ssh_key_name'],
-                             security_groups=security.get('security_groups', ['default']),
-                             scheduler_hints=scheduler_hints)
+
+        security_groups = security.get(
+                        'security_groups', ['default'])
+
+        for group_name in security_groups:
+            log.info('verifying security group %s', group_name)
+            self.create_or_get_security_group(group_name)
+
+        create_interval = utils.tdelta(options.get('server_retry_interval', '60s'))
+        attempts = 0
+        while True:
+            try:
+                attempts += 1
+                server = novaClient.servers.create(
+                    server_name,
+                    image_id,
+                    flavors[options.get('instance_size', 'm1.small')],
+                    meta=os_meta,
+                    userdata=user_data,
+                    files=files,
+                    availability_zone=availability_zone,
+                    key_name=security['ssh_key_name'],
+                    security_groups=security_groups,
+                    scheduler_hints=scheduler_hints)
+                break
+            except novaclient.exceptions.Forbidden as ex:
+                if attempts >= 100:
+                    raise
+                log.exception('capacity/forbidden error')
+            except KeyboardInterrupt:
+                raise
+            except Exception:
+                if attempts >= 3:
+                    raise
+                log.exception('error while provisioning')
+
+            time.sleep(create_interval.total_seconds())
 
         server = self.wait_for_fixedip(server)
         return self.get_server_info(server)
@@ -561,7 +689,9 @@ fi
 
         log.info('loading flavors...')
         flavors = {}
-        nova_client, neutron_client = Cloud.construct_nova_client(self._options)
+        #openstack_client = Cloud.create_openstack_client(self._options)
+        nova_client, neutron_client = Cloud.construct_nova_client(
+            self._options)
         for flavor in utils.retry(nova_client.flavors.list):
             flavors[flavor.name] = flavor.id
         self._flavors = flavors
@@ -572,7 +702,8 @@ fi
 
     def _get_server(self, server_id):
         try:
-            novaClient, neutronClient = Cloud.construct_nova_client(self._options)
+            novaClient, neutronClient = Cloud.construct_nova_client(
+                self._options)
             server = novaClient.servers.get(server_id)
 
             # delay loads data
@@ -583,27 +714,36 @@ fi
         except:
             raise
 
+    def update_metadata_date(self, server_info, key):
+        novaClient, neutronClient = Cloud.construct_nova_client(self._options)
+
+        dt_str = datetime.datetime.utcnow().isoformat()
+        utils.retry(novaClient.servers.set_meta_item,
+                    server_info['id'], key + '_dt', dt_str)
+
     def get_image(self):
         if self._image:
             return self._image
 
         image_expr = self._options.get('image', '^centos7-base')
         log.info('finding latest image (image=%s)...', image_expr)
-        novaClient, neutronClient = Cloud.construct_nova_client(self._options)
+        glance_client = Cloud.construct_glance_client(self._options)
 
         if 'image_id' in self._options:
-            self._image = novaClient.images.get(self._options['image_id'])
+            self._image = glance_client.get_image(self._options['image_id'])
             return self._image
 
-        images = utils.retry(novaClient.images.list, detailed=True)
+        images = utils.retry(glance_client.images.list, detailed=True)
 
         newest_image = None
         newest_created = None
 
         for image in images:
             if re.match(image_expr, image.name):
-                if bool(image.metadata.get('recommended', 'false')):
-                    created = time.strptime(image.created, "%Y-%m-%dT%H:%M:%SZ")
+                image_options = getattr(image, '__original__')
+                if bool(image_options.get('recommended', 'false')):
+                    created = time.strptime(
+                        image.created_at, "%Y-%m-%dT%H:%M:%SZ")
                     if newest_image is None or created > newest_created:
                         newest_image = image
                         newest_created = created
@@ -614,8 +754,61 @@ fi
         self._image = newest_image
         return newest_image
 
+    # def security_rule_exists(self, rule, all_rules):
+
+
+    def update_security_groups(self):
+
+        neutronclient = Cloud.construct_neutron_client(self._options)
+        security_groups = self._options.get('security_groups', {})
+        all_security_groups = self.get_security_groups()
+
+        for security_group_name in security_groups:
+            security_group = security_groups[security_group_name]
+            existing_group = self.create_or_get_security_group(security_group_name, neutronclient=neutronclient)
+
+            existing_rules = existing_group['security_group_rules']
+
+            normalized_rules = []
+            for rule in security_group:
+                remote_ip_prefix = rule['remote_ip_prefix']
+                if isinstance(remote_ip_prefix, list):
+                    for item in remote_ip_prefix:
+                        normalized_rule = {
+                            'direction': 'ingress',
+                            'protocol': rule.get('protocol', None),
+                            'port_range_min': rule.get('port_range_min', None),
+                            'port_range_max': rule.get('port_range_max', None),
+                            'remote_ip_prefix': item
+                        }
+                        normalized_rules.append(normalized_rule)
+                else:
+                    normalized_rules.append(rule)
+
+            for rule in normalized_rules:
+                rule['security_group_id'] = existing_group['id']
+
+                matched = 0
+                for existing_rule in existing_rules:
+                    if existing_rule['direction'] == 'egress':
+                        continue
+                    for item_name in rule:
+                        if existing_rule[item_name] != rule[item_name]:
+                            matched = 2
+                            break
+                        elif matched == 0:
+                            matched = 1
+                    if matched == 1:
+                        break
+
+                if matched != 1:
+                    neutronclient.create_security_group_rule({
+                        'security_group_rule': rule
+                    })
+
     def fix_server_attributes(self, server):
-        setattr(server, 'fqdn', '%s.%s' % (server.name, self._options['instance_fqdn_suffix']))
+        setattr(server, 'fqdn', '%s.%s' %
+                (server.name, self._options['instance_fqdn_suffix']))
         setattr(server, 'fixed_ip', self.get_server_fixed_ip(server))
         return server
 
@@ -625,9 +818,15 @@ fi
         servers = utils.retry(self.find_servers, options['name'])
 
         update_scripts = options.get('cloud_update', [])
+
         for server in servers:
+            server_info = server #self.get_server_info(server)
+            scripts = list(update_scripts)
+            if args.network:
+                scripts.append(self.get_cloud_config(server_info))
             log.info('updating %s...', server.name)
-            self.execute_scripts(update_scripts, self.get_server_info(server), is_first=False)
+            self.execute_scripts(
+                scripts, server_info, is_first=False)
 
     def scale(self, args):
         self._scale(args)
@@ -675,7 +874,7 @@ fi
             if args.force:
                 log.info('deleting servers (force rebuild)...')
                 while len(original_servers) > 0:
-                    self.delete_server(original_servers[0])
+                    self.delete_server(original_servers[0], force=args.force)
                     deleted_servers.append(original_servers[0])
                     servers.remove(original_servers[0])
                     del original_servers[0]
@@ -709,8 +908,7 @@ fi
                         continue
                 break
             else:
-                if fip_info is None:
-                    fip_info = self.get_floating_ip_pool()
+                fip_info = self.get_floating_ip_pool()
 
                 is_first = (len(servers) == 0)
                 floating_ip = None
@@ -724,20 +922,22 @@ fi
                     'peers': self.get_peers(servers),
                     'is_first': is_first,
                     'server_count': len(servers),
+                    'virtual_ips': self.get_virtual_ips(options.get('networking', {}))
                 }
 
                 server = self.create_server(server_info)
                 servers.append(server)
 
                 if strategy == 'series' or (strategy == 'one-parallel' and is_first):
-                    self.wait_for_new_servers([server], servers, is_first=is_first)
+                    self.wait_for_new_servers(
+                        [server], servers, is_first=is_first)
                 else:
                     new_servers.append(server)
 
         log.info('done')
 
     def get_cloud_config(self, server_info):
-        sysctl = {'vm.swappiness':1}
+        sysctl = {'vm.swappiness': 1}
 
         networks = {}
         commands = []
@@ -746,8 +946,8 @@ fi
         if len(virtual_ips) > 0:
             vip_idx = 0
             for vip in virtual_ips:
-                networks['lo:'+vip_idx] = {
-                    'DEVICE': "lo:"+vip_idx,
+                networks['lo:' + str(vip_idx)] = {
+                    'DEVICE': "lo:" + str(vip_idx),
                     'BOOTPROTO': "none",
                     'ONBOOT': "yes",
                     'TYPE': "Ethernet",
@@ -781,7 +981,8 @@ fi
                 'IPADDR': server_info['floating_ip'],
                 'NETMASK': "255.255.255.255",
             }
-            commands.append(utils.cat_file('/etc/modprobe.d/tunl.conf', 'alias tunl0 ipip'))
+            commands.append(utils.cat_file(
+                '/etc/modprobe.d/tunl.conf', 'alias tunl0 ipip'))
 
         for net_name in networks:
             net_file = '/etc/sysconfig/network-scripts/ifcfg-%s' % net_name
@@ -793,16 +994,27 @@ fi
     def validate_server(self, server_info, is_first=False):
         options = self._options
         scripts = options.get('scripts', {})
-        if 'cloud_validate' in scripts:
+        if 'validate' in scripts:
             log.info('validating server %s...', server_info.name)
-            self.execute_scripts(scripts['cloud_validate'], server_info, is_first=is_first)
+            self.execute_scripts(
+                scripts['validate'], server_info, is_first=is_first)
+
+    def _execute_scripts(self, script_name, server_info):
+        options = self._options
+        scripts = options.get('scripts', {})
+        if script_name in scripts:
+            log.info('validating server %s...', server_info.name)
+            self.execute_scripts(
+                scripts[script_name], server_info, is_first=is_first)
+            self.update_metadata(server_info, script_name)
 
     def wait_for_new_servers(self, new_servers, servers, is_first=False):
 
         finalize_servers = []
         while len(new_servers) > 0:
             idx = 0
-            log.info('waiting for new servers (%s remaining)...' % len(new_servers))
+            log.info('waiting for new servers (%s remaining)...' %
+                     len(new_servers))
             while idx < len(new_servers):
                 new_server = new_servers[idx]
                 server = self.get_server(new_server.id)
@@ -815,7 +1027,8 @@ fi
                     finalize_servers.append(server)
                     new_servers.remove(new_server)
                 elif server.status == 'ERROR':
-                    log.info('server failed provisioning (%s)', server.fault['message'])
+                    log.info('server failed provisioning (%s)',
+                             server.fault['message'])
                     log.info('server %s failed, deleting...' % server.name)
                     self.delete_server(server)
                     new_servers.remove(new_server)
@@ -848,6 +1061,7 @@ fi
 
                 server = self.get_server(deleted_server.id)
                 if server is None:
+                    self._plugins.on_server_deleted(deleted_server)
                     deleted_servers.remove(deleted_server)
 
                 if server is not None:
@@ -862,7 +1076,8 @@ fi
             if diff > retry_timeout:
                 log.warn('retrying server deletes...')
                 for server in deleted_servers:
-                    utils.retry(self.delete_server, server, skip_delete_scripts=True)
+                    utils.retry(self.delete_server, server,
+                                skip_delete_scripts=True)
                 start = datetime.datetime.now()
 
     def get_peers(self, servers):
@@ -890,7 +1105,8 @@ fi
 
         if 'cloud_ready' in options:
             log.info('running cloud ready scripts...')
-            self.execute_scripts(options['cloud_ready'], server_info, is_first=is_first)
+            self.execute_scripts(
+                options['cloud_ready'], server_info, is_first=is_first)
 
     def get_server_info(self, server):
         create_time = time.strptime(server.created,
@@ -913,7 +1129,7 @@ fi
     def execute_script(self, script, server_info, target_servers):
         if target_servers is None:
             if 'target' in script:
-                servers = [x for x in self.find_servers(script['target'])]
+                servers = [x for x in self.find_servers(script['target']) if x['fixed_ip'] != server_info['fixed_ip']]
             else:
                 servers = [server_info]
         else:
@@ -922,21 +1138,27 @@ fi
         server_idx = 0
         while True:
 
-            target_server = servers[server_idx]
-
-            target_server['target'] = server_info
             try:
-                utils.retry(self.execute_shell, script, target_server)
-                utils.retry(self.execute_ssh, script, target_server)
+                if len(servers) == 0:
+                    log.info('no target servers found, resuming...')
+                    return
+
+                target_server = servers[server_idx]
+                target_server['target'] = server_info
+
+                max_attempts = script.get('max_attempts', 5)
+                utils.retry2(self.execute_shell, max_attempts, script, target_server)
+                utils.retry2(self.execute_ssh, max_attempts, script, target_server)
                 break
             except KeyboardInterrupt:
-                exit(0)
+                raise
             except:
                 server_idx += 1
                 if server_idx >= len(servers):
                     raise
                 else:
-                    log.exception('failed to run script on %s, trying next' % target_server['fqdn'])
+                    log.exception(
+                        'failed to run script on %s, trying next' % target_server['fqdn'])
 
     def execute_ssh(self, script, server_info):
 
@@ -947,22 +1169,27 @@ fi
         if 'ssh' in script:
             stdout = script.get('stdout', False)
             sudo = script.get('sudo', False)
-            cmd = utils.render(script['ssh'], server=server_info, env=options['env'], cloud=self)
+            cmd = utils.render(script['ssh'], server=server_info, env=options[
+                               'env'], cloud=self, configs=options['configs'])
             exit_on_error = script.get('exit_on_error', True)
 
-            log.info('executing ssh command on %s...' % fqdn)
+            log.info('executing ssh command on %s ...' % fqdn)
             rc = utils.ssh(fixed_ip, cmd, user='centos',
-                           stdout=stdout, sudo=sudo, raise_error=False, exit_on_error=exit_on_error)
+                           stdout=stdout, sudo=sudo, raise_error=False, exit_on_error=exit_on_error,
+                           echo_command=script.get('echo_command', True))
             if rc != 0:
                 if rc == 255 and script.get('wait_for_reboot', False):
+                    time.sleep(10)
                     self.wait_for_ssh(fixed_ip, 'hostname', 'ssh_reboot')
                 else:
-                    raise RuntimeError('ssh script failed (rc=%s) on %s' % (rc, fqdn))
+                    raise RuntimeError(
+                        'ssh script failed (rc=%s) on %s' % (rc, fqdn))
 
     def execute_shell(self, script, server_info):
         options = self._options
         if 'shell' in script:
-            rc = os.system(utils.render(script['shell'], server=server_info, env=options['env']))
+            rc = os.system(utils.render(
+                script['shell'], server=server_info, env=options['env']))
             if rc != 0:
                 raise RuntimeError('shell script failed (rc=%s)' % rc)
 
@@ -992,13 +1219,23 @@ fi
             if server.status == 'ERROR':
                 self.delete_server(server, skip_delete_scripts=True)
                 deleted_servers.append(server)
+                servers.delete(server)
         self.wait_for_deleted(deleted_servers)
 
     def _run_scripts(self, state):
-        scripts, server, target_servers, is_first = state
-        result = self.execute_scripts(scripts, server, target_servers=target_servers, is_first=is_first)
-        log.info('done: %s', server['fqdn'])
-        return result
+        scripts_name, scripts, server_info, target_servers, is_first = state
+        try:
+            result = self.execute_scripts(
+                scripts, server_info, target_servers=target_servers, is_first=is_first)
+            self.update_metadata_date(server_info, scripts_name)
+            log.info('done: %s', server_info['fqdn'])
+            return result
+        except KeyboardInterrupt:
+            pass
+        return {'success': False, 'reason': 'KeyboardInterrupt'}
+
+    def init_script_worker(self):
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
 
     def run_scripts(self, args):
         options = self._options
@@ -1013,7 +1250,7 @@ fi
 
         if args.script == '-':
             all_scripts = {
-                args.script: [{'ssh': sys.stdin.read(), 'sudo': args.sudo, 'stdout':args.stdout}]
+                args.script: [{'ssh': sys.stdin.read(), 'sudo': args.sudo, 'stdout': args.stdout}]
             }
         else:
             all_scripts = options.get('scripts', {})
@@ -1027,18 +1264,22 @@ fi
             else:
                 target_servers = None
 
-            pool = mp.Pool(processes=args.threads)
-            p = pool.map_async(self._run_scripts, [(scripts, x, target_servers, False,) for x in
+            pool = mp.Pool(processes=args.batch, initializer=self.init_script_worker)
+            p = pool.map_async(self._run_scripts, [(args.script, scripts, x, target_servers, False,) for x in
                                                    servers])
             try:
-                print p.get(0xFFFF)
+                p.get(0xFFFF)
             except KeyboardInterrupt:
                 print "Caught KeyboardInterrupt, terminating workers"
                 pool.terminate()
                 pool.join()
                 raise
+            except:
+                pool.close()
+                raise
         else:
-            log.info('script %s was not found in %s', args.script, options['name'])
+            log.info('script %s was not found in %s',
+                     args.script, options['name'])
 
     def validate_servers(self, servers):
         for server in servers:
