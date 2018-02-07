@@ -100,6 +100,17 @@ def retry2(fn, max_attempts, *args, **kwargs):
             log.exception('failed to call %s, retrying in 10s...', fn.__name__)
             time.sleep(10)
 
+
+def confirm(prompt='Are you sure?', default=False):
+    sys.stdout.write(prompt + ' ')
+    response = sys.stdin.readline().strip('\n\t ')
+    if response == '':
+        return default
+    if response.lower() == 'y':
+        return True
+    return False
+
+
 def ssh(server, cmd, user=None, stdout=True, raise_error=True, sudo=False, exit_on_error=False, echo_command=True):
     cmd_array = ['ssh', '-T', '%s@%s' % (user, server),
                 '-oPreferredAuthentications=publickey', '-oStrictHostKeyChecking=no']

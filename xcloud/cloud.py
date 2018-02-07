@@ -127,7 +127,7 @@ class Cloud(object):
 
         return glance_client
 
-    def find_servers(self, role, cachable=False):
+    def find_servers(self, role, cachable=False, filter=None):
         """
         Used to locate servers by role.
 
@@ -150,18 +150,17 @@ class Cloud(object):
         log.info('locating servers (%s)...', ns_role)
         servers = utils.retry(novaClient.servers.list, detailed=True)
 
-        # role_pattern = os.environ.get('ROLE_PATTERN', None)
         for server in servers:
-            if role:
-            # if role_pattern:
-            #     if fnmatch(server.name, role_pattern):
-            #         ret.append(self.get_server_info(server))
-            # el
+            server_info = self.get_server_info(server)
+            if filter:
+                if fnmatch(server_info.name, filter) or fnmatch(server_info.fqdn, filter):
+                     ret.append(server_info)
+            elif role:
                 if 'role' in server.metadata:
-                    if server.metadata['role'] == ns_role:
-                        ret.append(self.get_server_info(server))
+                    if server_info.metadata['role'] == ns_role:
+                        ret.append(server_info)
             else:
-                ret.append(self.get_server_info(server))
+                ret.append(server_info)
 
         if cachable:
             self._find_servers_cache[ns_role] = ret
@@ -420,15 +419,14 @@ fi
             time.sleep(20)
 
     def delete_all(self):
-        novaClient, neutronClient = Cloud.construct_nova_client(self._options)
-        servers = utils.retry(novaClient.servers.list)
-        for item in servers:
-            print 'deleting server %s...' % item.name
-            utils.retry(novaClient.servers.delete, item.id)
-        server_groups = utils.retry(novaClient.server_groups.list)
-        for item in server_groups:
-            print 'deleting servergroup %s...' % item.name
-            utils.retry(novaClient.server_groups.delete, item.id)
+        options = self._options
+
+        servers = utils.retry(self.find_servers, options['name'])
+
+        for server in servers:
+            self.delete_server(server)
+        
+        self.wait_for_deleted(servers)
 
     def get_security_groups(self):
         neutron_client = Cloud.construct_neutron_client(self._options)
@@ -606,8 +604,9 @@ fi
 
         novaClient, neutronClient = Cloud.construct_nova_client(self._options)
         image_id = self.get_image().id
-        server_name = self.format_server_naming(
-            options.get('server_naming', {}))
+
+        server_naming = options.get('server_naming', {})
+        server_name = self.format_server_naming(server_naming)
         user_data = self.get_userdata(server_info)
 
         security = options.get('security', {})
@@ -636,9 +635,25 @@ fi
 
         if not options.get('pbis', True):
             os_meta['disable_pbis'] = 'true'
+        
+        user_meta = options.get('metadata', {})
+        for meta_name in user_meta:
+            meta_value = user_meta[meta_name].format(**server_info)
+            os_meta[meta_name] = meta_value
 
         files = self.read_files(server_info)
         availability_zone = server_info['availability_zone']
+
+        tags = [
+            server_naming.get('zone',''),
+            server_naming.get('team',''),
+            server_naming.get('env',''),
+            availability_zone,
+            options['name'],
+            options['shortname']
+        ] + options.get('tags', [])
+
+        os_meta['tags'] = ','.join(tags)
 
         flavors = self.get_flavors()
         log.info('creating server %s on %s...', server_name, availability_zone)
@@ -720,6 +735,13 @@ fi
         dt_str = datetime.datetime.utcnow().isoformat()
         utils.retry(novaClient.servers.set_meta_item,
                     server_info['id'], key + '_dt', dt_str)
+
+    def update_metadata(self, server_info, metadata):
+        novaClient, neutronClient = Cloud.construct_nova_client(self._options)
+
+        for k in metadata:
+            utils.retry(novaClient.servers.set_meta_item,
+                        server_info['id'], k, str(metadata[k]))
 
     def get_image(self):
         if self._image:
@@ -820,7 +842,7 @@ fi
         update_scripts = options.get('cloud_update', [])
 
         for server in servers:
-            server_info = server #self.get_server_info(server)
+            server_info = server
             scripts = list(update_scripts)
             if args.network:
                 scripts.append(self.get_cloud_config(server_info))
@@ -834,6 +856,21 @@ fi
     @staticmethod
     def get_server_age(server):
         return datetime.datetime.utcnow() - server.created
+
+    def delete_servers(self, args):
+        options = self._options
+        server_list = re.split('[\n ]+', args.servers)
+        servers = self.find_servers(options['name'])
+        print server_list
+
+        deleted_servers = []
+        for server in servers:
+            if server.name in server_list or server.fqdn in server_list:
+                self.delete_server(server)
+                deleted_servers.append(server)
+        
+        self.wait_for_deleted(deleted_servers)
+            
 
     def reboot_servers(self, args):
         servers = self.find_servers(args.name)
@@ -868,8 +905,17 @@ fi
             for x in servers:
                 age = Cloud.get_server_age(x)
                 if args.min_age <= age <= args.max_age:
-                    if fnmatch(x.name, args.server_name):
-                        original_servers.append(x)
+                    original_servers.append(x)
+                if x.metadata.get('rebuild', 'false') == 'true':
+                    original_servers.append(x)
+            
+                if args.servers is not None:
+                    server_list = re.split('[\n;, ]+', args.servers)
+                    
+                    for server in server_list:
+                        if fnmatch(x.name, server) or fnmatch(x.fqdn, server):
+                            original_servers.append(x)
+                            break
 
             if args.force:
                 log.info('deleting servers (force rebuild)...')
@@ -879,7 +925,7 @@ fi
                     servers.remove(original_servers[0])
                     del original_servers[0]
                 self.wait_for_deleted(deleted_servers)
-
+ 
         while True:
             if len(servers) > replicas:
                 deleted_servers.append(servers[0])
@@ -943,7 +989,7 @@ fi
         commands = []
 
         virtual_ips = server_info.get('virtual_ips', [])
-        if len(virtual_ips) > 0:
+        if virtual_ips and len(virtual_ips) > 0:
             vip_idx = 0
             for vip in virtual_ips:
                 networks['lo:' + str(vip_idx)] = {
@@ -1147,8 +1193,18 @@ fi
                 target_server['target'] = server_info
 
                 max_attempts = script.get('max_attempts', 5)
-                utils.retry2(self.execute_shell, max_attempts, script, target_server)
-                utils.retry2(self.execute_ssh, max_attempts, script, target_server)
+                sensu_silence = script.get('sensu_silence', False)
+
+                if sensu_silence:
+                    self._plugins.on_event('on_silence', target_server)
+
+                if 'shell' in script:
+                    utils.retry2(self.execute_shell, max_attempts, script, target_server)
+                if 'ssh' in script:
+                    utils.retry2(self.execute_ssh, max_attempts, script, target_server)
+                
+                if sensu_silence:
+                    self._plugins.on_event('on_unsilence', target_server)
                 break
             except KeyboardInterrupt:
                 raise
@@ -1239,14 +1295,22 @@ fi
 
     def run_scripts(self, args):
         options = self._options
-        original_servers = self.find_servers(options['name'])
+        original_servers = self.find_servers(options['name'], filter=options.get('filter', None))
+        server_list = re.split('[\n;, ]+', args.servers or '')
 
         servers = []
         for x in original_servers:
             age = Cloud.get_server_age(x)
-            if args.min_age <= age <= args.max_age:
-                if fnmatch(x.name, args.server_name):
-                    servers.append(x)
+            for server in server_list:
+                if fnmatch(x.name, server) or fnmatch(x.fqdn, server):
+                    dt_key = args.script + '_dt'
+                    if dt_key in x.metadata:
+                        script_diff = datetime.datetime.utcnow() - datetime.datetime.strptime(x.metadata[dt_key], "%Y-%m-%dT%H:%M:%S.%f")
+                        if args.since > script_diff:
+                            continue
+                    if args.min_age <= age <= args.max_age:
+                        servers.append(x)
+                    break
 
         if args.script == '-':
             all_scripts = {

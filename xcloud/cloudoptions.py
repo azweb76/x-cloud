@@ -2,7 +2,7 @@ import getpass
 import yaml
 import os
 import logging
-
+import getpass
 #from xcrypto import xcrypto
 from xcloud import utils
 
@@ -75,7 +75,7 @@ class CloudOptions(dict):
 
         if args.password:
             defaults['password'] = args.password
-
+        
         return defaults
 
     @staticmethod
@@ -93,6 +93,9 @@ class CloudOptions(dict):
         all_cloud_init = region.get('cloud_init', [])
         clusters = region.get('clusters', [])
         all_security_groups = region.get('security_groups', {})
+
+        if 'password' not in defaults:
+            defaults['password'] = getpass.getpass('Openstack password: ')
 
         env = region.get('env', {})
         configs = region.get('configs', {})
@@ -132,6 +135,12 @@ class CloudOptions(dict):
 
             if args.password:
                 options['password'] = args.password
+            
+            ssh_key = cluster.get('security', {}).get('ssh_key_name', None)
+            if ssh_key:
+                rc = os.system('ssh-add -L | grep %s >/dev/null 2>&1 || ssh-add ~/.ssh/%s >/dev/null 2>&1' % (ssh_key, ssh_key))
+                if rc != 0:
+                    exit('please ensure %s (~/.ssh/%s) SSH key is loaded into SSH Agent' % (ssh_key, ssh_key))
 
             all_options.append(options)
 

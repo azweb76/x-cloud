@@ -25,7 +25,7 @@ class PluginManager(object):
 
         return plugins
 
-    def _on_event(self, event_name, *args):
+    def on_event(self, event_name, *args):
         for plugin in self._plugins:
             if hasattr(plugin, event_name):
                 fn = getattr(plugin, event_name)
@@ -37,13 +37,13 @@ class PluginManager(object):
         return mod
 
     def on_before_server_pulled(self, server):
-        self._on_event('on_before_server_pulled', server)
+        self.on_event('on_before_server_pulled', server)
 
     def on_server_deleted(self, server):
-        self._on_event('on_server_deleted', server)
+        self.on_event('on_server_deleted', server)
 
     def on_server_pushed(self, server):
-        self._on_event('on_server_pushed', server)
+        self.on_event('on_server_pushed', server)
 
     def on_describe(self, server, info):
-        self._on_event('on_describe', server, info)
+        self.on_event('on_describe', server, info)

@@ -15,15 +15,28 @@ class SensuClient(RequestClient):
         return RequestClient._get(self, 'silenced')
 
     def silence_client(self, client_name, expire=3600, reason='unknown', creator='x-cloud'):
-        resp = RequestClient._post(self, 'silenced', {
-            "subscription": 'client:%s' % client_name,
-            "expire": expire,
-            "reason": reason,
-            "creator": creator
-        })
-        duration = utils.tdelta(self.options.get('silence_wait', '15s'))
-        time.sleep(duration.total_seconds())
-        return resp
+        entry = self.get_silenced_client(client_name)
+        if entry is None:
+            resp = RequestClient._post(self, 'silenced', {
+                "subscription": 'client:%s' % client_name,
+                "expire": expire,
+                "reason": reason,
+                "creator": creator
+            })
+            duration = utils.tdelta(self.options.get('silence_wait', '15s'))
+            time.sleep(duration.total_seconds())
+            return resp
+        return entry
+        
+
+    def get_silenced_client(self, client_name):
+        silenced = self.get_silenced()
+        subscription = 'client:%s' % client_name
+        entry = [x for x in silenced if x['subscription'] == subscription]
+
+        if entry:
+            return entry[0]
+        return None
 
     def unsilence_client(self, client_name):
         silenced = self.get_silenced()

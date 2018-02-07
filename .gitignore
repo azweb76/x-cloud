@@ -22,3 +22,6 @@ var/
 .installed.cfg
 *.egg
 .idea/
+
+vendor/
+.vscode/

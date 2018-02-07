@@ -22,6 +22,9 @@ class Plugin(object):
             self._sensu_client = None
 
     def on_before_server_pulled(self, server):
+        self.on_silence(server)
+
+    def on_silence(self, server):
         if self._sensu_client:
             LOG.info('silencing %s', server.name)
             self._sensu_client.silence_client(server.name, reason='pulling server')
@@ -32,6 +35,9 @@ class Plugin(object):
             self._sensu_client.delete_client(server.name)
 
     def on_server_pushed(self, server):
+        self.on_unsilence(server)
+
+    def on_unsilence(self, server):
         if self._sensu_client:
             LOG.info('unsilencing %s', server.name)
             self._sensu_client.unsilence_client(server.name)

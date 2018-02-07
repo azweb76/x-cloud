@@ -3,5 +3,6 @@ jinja2
 glob2
 python-keystoneclient
 python-neutronclient
-python-novaclient
+python-novaclient==3.3.3
 requests
+

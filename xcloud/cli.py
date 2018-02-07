@@ -8,6 +8,7 @@ from fnmatch import fnmatch
 
 import time
 import yaml
+import sys
 
 import utils
 
@@ -48,14 +49,16 @@ def main():
                               type=int, help='number of servers to scale to')
         parser_a.add_argument('--rebuild', default=False,
                               action='store_true', help='rebuild the servers')
+        parser_a.add_argument('--rebuild-all', default=False,
+                              action='store_true', help='rebuild all the servers')
         parser_a.add_argument('-p', '--parallel', default=False,
                               action='store_true', help='rebuild all the servers in parallel')
-        parser_a.add_argument('--min-age', default='0s',
+        parser_a.add_argument('--min-age', default='9999d',
                               type=utils.tdelta, help='minimum age to rebuild servers')
         parser_a.add_argument('--max-age', default='9999d',
                               type=utils.tdelta, help='max age to rebuild servers')
-        parser_a.add_argument('--server-name', default='*',
-                              type=str, help='name of servers to rebuild')
+        parser_a.add_argument('--servers', default=None,
+                              type=str, help='name of servers to rebuild. use - for stdin. delimited by ;,<newline>; supports glob pattern')
         parser_a.add_argument('--force', action='store_true',
                               help='force and action such as delete')
         parser_a.add_argument('-v', '--validate', default=False, action='store_true',
@@ -83,8 +86,10 @@ def main():
                               type=utils.tdelta, help='minimum age to rebuild servers')
         parser_a.add_argument('--max-age', default='9999d',
                               type=utils.tdelta, help='max age to rebuild servers')
-        parser_a.add_argument('--server-name', default='*',
-                              type=str, help='name of servers to rebuild')
+        parser_a.add_argument('--since', default='0d',
+                              type=utils.tdelta, help='time since last run')
+        parser_a.add_argument('--servers', default='*',
+                              type=str, help='name of servers to rebuild. use - for stdin. delimited by ;,<newline>; supports glob pattern')
         parser_a.add_argument('--batch', default=8, type=int,
                               help='number of servers to run in parallel')
         parser_a.add_argument('--stdout', default=False,
@@ -102,6 +107,19 @@ def main():
                               action='store_true')
         parser_a.set_defaults(func=list_cli)
 
+        parser_a = subparsers.add_parser('delete', help='delete servers')
+        parser_a.add_argument('-c', '--cluster', default='*',
+                              type=str, help='name of cluster')
+        parser_a.add_argument('servers', help='servers, delimited by space or newline')
+        parser_a.set_defaults(func=delete_cli)
+
+        parser_a = subparsers.add_parser('meta', help='update server metadata')
+        parser_a.add_argument('-c', '--cluster', default='*',
+                              type=str, help='name of cluster')
+        parser_a.add_argument('--filter', help='server name filter')
+        parser_a.add_argument('metadata', help='server metadata to update (key=value;key1=value1)')
+        parser_a.set_defaults(func=update_metadata)
+
         parser_a = subparsers.add_parser('setup', help='setup the clusters')
         parser_a.set_defaults(func=setup_cli)
 
@@ -117,7 +135,17 @@ def main():
 
 
 def scale_cli(args):
+    if args.servers and args.servers == '-':
+        args.servers = sys.stdin.read().strip('\n ')
     all_options = CloudOptions.create_from_file(args.file, args)
+    if args.rebuild_all:
+        if not utils.confirm('Are you sure you want to rebuild all?'):
+            return
+        for options in all_options:
+            option_name = options['name']
+            if fnmatch(option_name, args.cluster):
+                cloud = Cloud.create(options)
+                cloud.delete_all()
     while True:
         try:
             for options in all_options:
@@ -157,7 +185,38 @@ def reboot_cli(args):
             cloud.reboot_servers(args)
 
 
+def delete_cli(args):
+    if args.servers == '-':
+        args.servers = sys.stdin.read().strip('\n ')
+    all_options = CloudOptions.create_from_file(args.file, args)
+    for options in all_options:
+        option_name = options['name']
+        if fnmatch(option_name, args.cluster):
+            cloud = Cloud.create(options)
+            cloud.delete_servers(args)
+
+
+def update_metadata(args):
+    if args.metadata == '-':
+        args.metadata = sys.stdin.read().strip('\n ')
+    all_options = CloudOptions.create_from_file(args.file, args)
+    for options in all_options:
+        option_name = options['name']
+        metadata = {}
+        metadata_str = args.metadata.split(';')
+        for x in metadata_str:
+            parts = x.split('=')
+            metadata[parts[0]] = parts[1]
+        if fnmatch(option_name, args.cluster):
+            cloud = Cloud.create(options)
+            for server in cloud.find_servers(None, filter=args.filter):
+                cloud.update_metadata(server, metadata)
+                print 'updated %s metadata' % server.fqdn
+
+
 def run_cli(args):
+    if args.servers == '-':
+        args.servers = sys.stdin.read().strip('\n ')
     all_options = CloudOptions.create_from_file(args.file, args)
     try:
         for options in all_options:
@@ -180,13 +239,14 @@ def list_cli(args):
     all_options = CloudOptions.create_from_file(args.file, args)
     for options in all_options:
         option_name = options['name']
+        server_filter = options.get('filter', None)
         if fnmatch(option_name, args.cluster):
             cloud = Cloud.create(options)
             flavors = {}
             flavors_by_name = cloud.get_flavors()
             for flavor in flavors_by_name:
                 flavors[flavors_by_name[flavor]] = flavor
-            servers = cloud.find_servers(option_name)
+            servers = cloud.find_servers(option_name, filter=server_filter)
 
             print 'CLUSTER: %s' % option_name
             print ''
@@ -210,8 +270,8 @@ def list_cli(args):
                     info = {}
                     cloud._plugins.on_describe(server, info)
                     print '  %s %s %s %s %s %s %s %s' % (server.fqdn.ljust(30), server.fixed_ip.ljust(15),
-                                                server.metadata[
-                                                    'floating_ip'].ljust(15),
+                                                server.metadata.get(
+                                                    'floating_ip', '').ljust(15),
                                                 ('%s' % server.created).ljust(21),
                                                 flavors[server.flavor['id']].ljust(10),
                                                 info.get('has_sensu', False),
