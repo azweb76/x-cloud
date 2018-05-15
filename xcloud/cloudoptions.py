@@ -95,7 +95,10 @@ class CloudOptions(dict):
         all_security_groups = region.get('security_groups', {})
 
         if 'password' not in defaults:
-            defaults['password'] = getpass.getpass('Openstack password: ')
+            if 'OS_PASSWORD' in os.environ:
+                defaults['password'] = os.environ['OS_PASSWORD']
+            else:
+                defaults['password'] = getpass.getpass('Openstack password: ')
 
         env = region.get('env', {})
         configs = region.get('configs', {})

@@ -144,14 +144,14 @@ def scale_cli(args):
         for options in all_options:
             option_name = options['name']
             if fnmatch(option_name, args.cluster):
-                cloud = Cloud.create(options)
+                cloud = Cloud.create(options, all_options)
                 cloud.delete_all()
     while True:
         try:
             for options in all_options:
                 option_name = options['name']
                 if fnmatch(option_name, args.cluster):
-                    cloud = Cloud.create(options)
+                    cloud = Cloud.create(options, all_options)
                     cloud.scale(args)
             if args.watch is None:
                 break
@@ -172,7 +172,7 @@ def update_cli(args):
     for options in all_options:
         option_name = options['name']
         if fnmatch(option_name, args.cluster):
-            cloud = Cloud.create(options)
+            cloud = Cloud.create(options, all_options)
             cloud.update_servers(args)
 
 
@@ -192,7 +192,7 @@ def delete_cli(args):
     for options in all_options:
         option_name = options['name']
         if fnmatch(option_name, args.cluster):
-            cloud = Cloud.create(options)
+            cloud = Cloud.create(options, all_options)
             cloud.delete_servers(args)
 
 
@@ -208,7 +208,7 @@ def update_metadata(args):
             parts = x.split('=')
             metadata[parts[0]] = parts[1]
         if fnmatch(option_name, args.cluster):
-            cloud = Cloud.create(options)
+            cloud = Cloud.create(options, all_options)
             for server in cloud.find_servers(None, filter=args.filter):
                 cloud.update_metadata(server, metadata)
                 print 'updated %s metadata' % server.fqdn
@@ -222,7 +222,7 @@ def run_cli(args):
         for options in all_options:
             option_name = options['name']
             if fnmatch(option_name, args.cluster):
-                cloud = Cloud.create(options)
+                cloud = Cloud.create(options, all_options)
                 cloud.run_scripts(args)
     except KeyboardInterrupt:
         exit(1)
@@ -230,7 +230,7 @@ def run_cli(args):
 
 def setup_cli(args):
     options = CloudOptions.create_from_defaults(args.file, args)
-    cloud = Cloud.create(options)
+    cloud = Cloud.create(options, {})
     
     cloud.update_security_groups()
 
@@ -241,7 +241,7 @@ def list_cli(args):
         option_name = options['name']
         server_filter = options.get('filter', None)
         if fnmatch(option_name, args.cluster):
-            cloud = Cloud.create(options)
+            cloud = Cloud.create(options, all_options)
             flavors = {}
             flavors_by_name = cloud.get_flavors()
             for flavor in flavors_by_name:
@@ -262,21 +262,22 @@ def list_cli(args):
                 for size in by_size:
                     print '  %s: %s' % (size, by_size[size])
             else:
-                print '  %s %s %s %s %s %s %s %s' % ('fqdn'.ljust(30), 'ip'.ljust(15), 'floater'.ljust(15), 'created'.ljust(21),
-                                            'size'.ljust(10), 'sensu', 'validated_on'.ljust(26), 'patched_on'.ljust(26))
-                print '  %s %s %s %s %s %s %s %s' % ('-' * 30, '-' * 15, '-' * 15, '-' * 21, '-' * 10, '-' * 5, 
-                    '-' * 26, '-' * 26)
+                print '  %s %s %s %s %s %s %s %s %s' % ('fqdn'.ljust(30), 'ip'.ljust(15), 'floater'.ljust(15), 'created'.ljust(21),
+                                            'size'.ljust(10), 'sensu', 'validated_on'.ljust(26), 'patched_on'.ljust(26), 'tags'.ljust(50))
+                print '  %s %s %s %s %s %s %s %s %s' % ('-' * 30, '-' * 15, '-' * 15, '-' * 21, '-' * 10, '-' * 5, 
+                    '-' * 26, '-' * 26, '-' * 26)
                 for server in servers:
                     info = {}
                     cloud._plugins.on_describe(server, info)
-                    print '  %s %s %s %s %s %s %s %s' % (server.fqdn.ljust(30), server.fixed_ip.ljust(15),
+                    print '  %s %s %s %s %s %s %s %s %s' % (server.fqdn.ljust(30), server.fixed_ip.ljust(15),
                                                 server.metadata.get(
                                                     'floating_ip', '').ljust(15),
                                                 ('%s' % server.created).ljust(21),
                                                 flavors[server.flavor['id']].ljust(10),
-                                                info.get('has_sensu', False),
+                                                str(info.get('has_sensu', False)).ljust(5),
                                                 str(server.metadata.get('validate_dt', None)).ljust(26),
-                                                str(server.metadata.get('patch_dt', None)).ljust(26))
+                                                str(server.metadata.get('patch_dt', None)).ljust(26),
+                                                str(server.metadata.get('tags', None)).ljust(50))
             print ''
 
 
