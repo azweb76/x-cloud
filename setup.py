@@ -10,7 +10,7 @@ setup(
         'python-keystoneclient==3.10.0',
         'python-neutronclient==6.2.0',
         'python-novaclient==7.1.0',
-        'requests==2.10.0',
+        'requests==2.14.2',
         'babel==2.3.4'
     ],
     author="Dan Clayton",
