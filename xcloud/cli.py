@@ -10,7 +10,7 @@ import time
 import yaml
 import sys
 
-import utils
+from xcloud import utils
 
 from xcloud.cloud import Cloud
 from xcloud.cloudoptions import CloudOptions
@@ -211,7 +211,7 @@ def update_metadata(args):
             cloud = Cloud.create(options, all_options)
             for server in cloud.find_servers(None, filter=args.filter):
                 cloud.update_metadata(server, metadata)
-                print 'updated %s metadata' % server.fqdn
+                print('updated %s metadata' % server.fqdn)
 
 
 def run_cli(args):
@@ -248,8 +248,8 @@ def list_cli(args):
                 flavors[flavors_by_name[flavor]] = flavor
             servers = cloud.find_servers(option_name, filter=server_filter)
 
-            print 'CLUSTER: %s' % option_name
-            print ''
+            print('CLUSTER: %s' % option_name)
+            print('')
 
             by_size = {}
             if args.summary:
@@ -260,16 +260,16 @@ def list_cli(args):
                     else:
                         by_size[size] += 1
                 for size in by_size:
-                    print '  %s: %s' % (size, by_size[size])
+                    print('  %s: %s' % (size, by_size[size]))
             else:
-                print '  %s %s %s %s %s %s %s %s %s' % ('fqdn'.ljust(30), 'ip'.ljust(15), 'floater'.ljust(15), 'created'.ljust(21),
-                                            'size'.ljust(10), 'sensu', 'validated_on'.ljust(26), 'patched_on'.ljust(26), 'tags'.ljust(50))
-                print '  %s %s %s %s %s %s %s %s %s' % ('-' * 30, '-' * 15, '-' * 15, '-' * 21, '-' * 10, '-' * 5, 
-                    '-' * 26, '-' * 26, '-' * 26)
+                print('  %s %s %s %s %s %s %s %s %s' % ('fqdn'.ljust(30), 'ip'.ljust(15), 'floater'.ljust(15), 'created'.ljust(21),
+                                            'size'.ljust(10), 'sensu', 'validated_on'.ljust(26), 'patched_on'.ljust(26), 'tags'.ljust(50)))
+                print('  %s %s %s %s %s %s %s %s %s' % ('-' * 30, '-' * 15, '-' * 15, '-' * 21, '-' * 10, '-' * 5, 
+                    '-' * 26, '-' * 26, '-' * 26))
                 for server in servers:
                     info = {}
                     cloud._plugins.on_describe(server, info)
-                    print '  %s %s %s %s %s %s %s %s %s' % (server.fqdn.ljust(30), server.fixed_ip.ljust(15),
+                    print('  %s %s %s %s %s %s %s %s %s' % (server.fqdn.ljust(30), server.fixed_ip.ljust(15),
                                                 server.metadata.get(
                                                     'floating_ip', '').ljust(15),
                                                 ('%s' % server.created).ljust(21),
@@ -277,8 +277,8 @@ def list_cli(args):
                                                 str(info.get('has_sensu', False)).ljust(5),
                                                 str(server.metadata.get('validate_dt', None)).ljust(26),
                                                 str(server.metadata.get('patch_dt', None)).ljust(26),
-                                                str(server.metadata.get('tags', None)).ljust(50))
-            print ''
+                                                str(server.metadata.get('tags', None)).ljust(50)))
+            print('')
 
 
 if __name__ == '__main__':

@@ -1,0 +1,19 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+"glob2" = "*"
+python-keystoneclient = "*"
+python-neutronclient = "*"
+python-novaclient = "==3.3.3"
+requests = "*"
+PyYAML = "==3.12"
+"Jinja2" = "*"
+python-glanceclient = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "2.7.14"

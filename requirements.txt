@@ -4,5 +4,6 @@ glob2
 python-keystoneclient
 python-neutronclient
 python-novaclient==3.3.3
+python-glanceclient
 requests
 

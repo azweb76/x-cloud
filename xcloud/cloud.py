@@ -8,7 +8,7 @@ import re
 import collections
 from fnmatch import fnmatch
 import multiprocessing as mp
-from copy_reg import pickle
+#from copy_reg import pickle
 from multiprocessing.pool import ApplyResult
 import signal
 from types import MethodType
@@ -17,7 +17,7 @@ import keystoneauth1
 import neutronclient.neutron.client
 import glanceclient
 import novaclient.v2.client
-import openstackclient
+#import openstackclient
 from fnmatch import fnmatch
 
 import datetime
@@ -40,24 +40,24 @@ clients = {}
 OS_SIZES = {'tiny': 1, 'small': 2, 'medium': 3, 'large': 4, 'xlarge': 5}
 
 
-def _pickle_method(method):
-    func_name = method.im_func.__name__
-    obj = method.im_self
-    cls = method.im_class
-    return _unpickle_method, (func_name, obj, cls)
+# def _pickle_method(method):
+#     func_name = method.im_func.__name__
+#     obj = method.im_self
+#     cls = method.im_class
+#     return _unpickle_method, (func_name, obj, cls)
 
 
-def _unpickle_method(func_name, obj, cls):
-    for cls in cls.mro():
-        try:
-            func = cls.__dict__[func_name]
-        except KeyError:
-            pass
-        else:
-            break
-    return func.__get__(obj, cls)
+# def _unpickle_method(func_name, obj, cls):
+#     for cls in cls.mro():
+#         try:
+#             func = cls.__dict__[func_name]
+#         except KeyError:
+#             pass
+#         else:
+#             break
+#     return func.__get__(obj, cls)
 
-pickle(MethodType, _pickle_method, _unpickle_method)
+# pickle(MethodType, _pickle_method, _unpickle_method)
 
 
 class Cloud(object):
@@ -669,7 +669,7 @@ fi
             availability_zone,
             options['name'],
             options['shortname']
-        ] + options.get('tags', [])
+        ] + options.get('tags', []) + server_info.get('tags', [])
 
         os_meta['tags'] = ','.join(tags)
 
@@ -976,13 +976,17 @@ fi
 
                 is_first = (len(servers) == 0)
                 floating_ip = None
+                floating_ip_tags = []
                 if fip_info is not None:
-                    floating_ip = utils.retry(self.get_floating_ip, *fip_info)['ip']
+                    floating_ip_info = utils.retry(self.get_floating_ip, *fip_info)
+                    floating_ip = floating_ip_info['ip']
+                    floating_ip_tags = floating_ip_info.get('tags', [])
 
                 server_info = {
                     'availability_zone': self.find_availability_zone(servers),
                     'servers': servers,
                     'floating_ip': floating_ip,
+                    'tags': floating_ip_tags,
                     'peers': self.get_peers(servers),
                     'is_first': is_first,
                     'server_count': len(servers),
@@ -1407,7 +1411,7 @@ fi
             try:
                 p.get(0xFFFF)
             except KeyboardInterrupt:
-                print "Caught KeyboardInterrupt, terminating workers"
+                print("Caught KeyboardInterrupt, terminating workers")
                 pool.terminate()
                 pool.join()
                 raise
