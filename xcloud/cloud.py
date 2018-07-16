@@ -8,7 +8,7 @@ import re
 import collections
 from fnmatch import fnmatch
 import multiprocessing as mp
-#from copy_reg import pickle
+from copy_reg import pickle
 from multiprocessing.pool import ApplyResult
 import signal
 from types import MethodType
@@ -40,24 +40,24 @@ clients = {}
 OS_SIZES = {'tiny': 1, 'small': 2, 'medium': 3, 'large': 4, 'xlarge': 5}
 
 
-# def _pickle_method(method):
-#     func_name = method.im_func.__name__
-#     obj = method.im_self
-#     cls = method.im_class
-#     return _unpickle_method, (func_name, obj, cls)
+def _pickle_method(method):
+    func_name = method.im_func.__name__
+    obj = method.im_self
+    cls = method.im_class
+    return _unpickle_method, (func_name, obj, cls)
 
 
-# def _unpickle_method(func_name, obj, cls):
-#     for cls in cls.mro():
-#         try:
-#             func = cls.__dict__[func_name]
-#         except KeyError:
-#             pass
-#         else:
-#             break
-#     return func.__get__(obj, cls)
+def _unpickle_method(func_name, obj, cls):
+    for cls in cls.mro():
+        try:
+            func = cls.__dict__[func_name]
+        except KeyError:
+            pass
+        else:
+            break
+    return func.__get__(obj, cls)
 
-# pickle(MethodType, _pickle_method, _unpickle_method)
+pickle(MethodType, _pickle_method, _unpickle_method)
 
 
 class Cloud(object):
