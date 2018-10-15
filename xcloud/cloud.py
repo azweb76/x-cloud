@@ -659,6 +659,11 @@ fi
             meta_value = user_meta[meta_name].format(**server_info)
             os_meta[meta_name] = meta_value
 
+        server_meta = server_info.get('metadata', {})
+        for meta_name in server_meta:
+            meta_value = server_meta[meta_name]
+            os_meta[meta_name] = meta_value
+
         files = self.read_files(server_info)
         availability_zone = server_info['availability_zone']
 
@@ -977,16 +982,19 @@ fi
                 is_first = (len(servers) == 0)
                 floating_ip = None
                 floating_ip_tags = []
+                floating_ip_meta = {}
                 if fip_info is not None:
                     floating_ip_info = utils.retry(self.get_floating_ip, *fip_info)
                     floating_ip = floating_ip_info['ip']
                     floating_ip_tags = floating_ip_info.get('tags', [])
+                    floating_ip_meta = floating_ip_info.get('metadata', {})
 
                 server_info = {
                     'availability_zone': self.find_availability_zone(servers),
                     'servers': servers,
                     'floating_ip': floating_ip,
                     'tags': floating_ip_tags,
+                    'metadata': floating_ip_meta,
                     'peers': self.get_peers(servers),
                     'is_first': is_first,
                     'server_count': len(servers),
@@ -1234,6 +1242,8 @@ fi
                     utils.retry2(self.execute_ssh, max_attempts, script, target_server)
                 if 'update_tags' in script:
                     utils.retry2(self.update_tags, max_attempts, script, target_server)
+                if 'update_meta' in script:
+                    utils.retry2(self.update_meta_script, max_attempts, script, target_server)
                 
                 if sensu_silence:
                     self._plugins.on_event('on_unsilence', target_server)
@@ -1291,6 +1301,43 @@ fi
 
         utils.retry(novaClient.servers.set_meta_item,
                     server_info['id'], 'tags', tags_meta)
+
+    def update_meta_script(self, script, server_info):
+
+        novaClient, neutronClient = Cloud.construct_nova_client(self._options)
+
+        fixed_ip = server_info['fixed_ip']
+        fqdn = server_info['fqdn']
+
+        options = self._options
+
+        server_naming = options.get('server_naming', {})
+        server_name = self.format_server_naming(server_naming)
+        availability_zone = server_info['availability_zone']
+
+        metadata_updates = options.get('metadata', {})
+
+        metadata = server_info.get('metadata', {})
+        if 'floating_ip' in metadata:
+            floating_ip = metadata['floating_ip']
+            networking = options.get('networking', {})
+            if 'floating_ips' in networking:
+                floating_ips = networking['floating_ips']
+                ip_pools = networking.get('ip_pools', {})
+                ip_pool = ip_pools[floating_ips]
+
+                if 'fixed' in ip_pool:
+                    fixed_ips = ip_pool['fixed']
+                    for floating_ip_ in fixed_ips:
+                        if isinstance(floating_ip_, collections.Mapping):
+                            if floating_ip_['ip'] == floating_ip:
+                                if 'metadata' in floating_ip_:
+                                    metadata_updates = dict(metadata_updates, **floating_ip_['metadata'])
+                                    break
+
+        for meta_name in metadata_updates:
+            utils.retry(novaClient.servers.set_meta_item,
+                        server_info['id'], meta_name, metadata_updates[meta_name])
 
     def execute_ssh(self, script, server_info):
 
