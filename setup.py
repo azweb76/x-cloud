@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="xcloud",
-    version="0.0.4",
+    version="0.0.5",
     install_requires=[
         'PyYaml',
         'jinja2',
@@ -10,6 +10,7 @@ setup(
         'python-keystoneclient==3.10.0',
         'python-neutronclient==6.2.0',
         'python-novaclient==7.1.0',
+        'python-glanceclient==2.17.0',
         'requests>=2.19.1',
         'babel==2.3.4'
     ],

@@ -2,6 +2,7 @@
 # coding: utf-8
 
 import argparse
+import json
 import logging
 import os
 from fnmatch import fnmatch
@@ -31,7 +32,7 @@ def main():
             choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
             help='optional. Set the log level.')
 
-        parser.add_argument('-u', '--username', default=os.environ.get('OS_USERNAME', None),
+        parser.add_argument('-u', '--username', default=os.environ.get('OS_USERNAME', os.environ['USER']),
                             help='username to access openstack')
         parser.add_argument('-p', '--password', default=os.environ.get('OS_PASSWORD', None),
                             help='password to access openstack')
@@ -65,6 +66,8 @@ def main():
                               help='validate the servers before scale')
         parser_a.add_argument('-c', '--cluster', default='*',
                               type=str, help='name of cluster')
+        parser_a.add_argument('--metadata', default={},
+                              type=utils.parse_dict, help='metadata filter')
         parser_a.set_defaults(func=scale_cli)
 
         parser_a = subparsers.add_parser('update', help='update servers')
@@ -94,6 +97,8 @@ def main():
                               help='number of servers to run in parallel')
         parser_a.add_argument('--stdout', default=False,
                               action='store_true', help='print stdout for stdin script')
+        parser_a.add_argument('--metadata', default={},
+                              type=utils.parse_dict, help='metadata filter')
         parser_a.add_argument(
             '--sudo', default=False, action='store_true', help='run stdin script as sudo')
         parser_a.add_argument('script', default=None,

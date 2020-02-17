@@ -1,7 +1,7 @@
 import requests
-import utils
+from xcloud import utils
 import time
-from RequestClient import RequestClient
+from xcloud.RequestClient import RequestClient
 import os
 
 class SensuClient(RequestClient):
