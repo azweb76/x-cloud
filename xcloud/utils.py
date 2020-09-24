@@ -8,6 +8,7 @@ import yaml
 import sys
 from datetime import timedelta
 
+from fnmatch import fnmatch
 from jinja2 import DictLoader
 from jinja2 import Environment, is_undefined
 
@@ -111,6 +112,26 @@ def confirm(prompt='Are you sure?', default=False):
     return False
 
 
+def parse_dict(s):
+    d = {}
+    d_str = s.split(';')
+    for x in d_str:
+        parts = x.split('=')
+        d[parts[0]] = parts[1]
+    return d
+
+
+def dict_match(dict, dict_expr):
+    for k in dict_expr:
+        if not dict:
+            return False
+        if k not in dict:
+            return False
+        if not fnmatch(dict[k], dict_expr[k]):
+            return False
+    return True
+
+
 def ssh(server, cmd, user=None, stdout=True, raise_error=True, sudo=False, exit_on_error=False, echo_command=True):
     cmd_array = ['ssh', '-T', '%s@%s' % (user, server),
                 '-oPreferredAuthentications=publickey', '-oStrictHostKeyChecking=no']
@@ -127,9 +148,9 @@ def ssh(server, cmd, user=None, stdout=True, raise_error=True, sudo=False, exit_
         exit_cmd = 'set -ae\n'
     if sudo:
         cmd = 'sudo bash <<-\'SUDO_EOF\'%s\n%s%s\nSUDO_EOF' % (echo_cmd, exit_cmd, cmd)
-        p.communicate(cmd)
+        p.communicate(cmd.encode())
     else:
-        p.communicate(exit_cmd + cmd)
+        p.communicate((exit_cmd + cmd).encode())
     rc = p.returncode
     if raise_error and rc != 0:
         raise Exception('unable to run ssh command on %s [exitcode=%s]' % (server, rc))
@@ -138,7 +159,7 @@ def ssh(server, cmd, user=None, stdout=True, raise_error=True, sudo=False, exit_
 
 def extend(d, u):
     o = dict(d)
-    for k, v in u.iteritems():
+    for k, v in u.items():
         if isinstance(v, collections.Mapping):
             r = extend(o.get(k, {}), v)
             o[k] = r

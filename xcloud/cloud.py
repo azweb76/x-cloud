@@ -8,7 +8,7 @@ import re
 import collections
 from fnmatch import fnmatch
 import multiprocessing as mp
-from copy_reg import pickle
+import copyreg
 from multiprocessing.pool import ApplyResult
 import signal
 from types import MethodType
@@ -27,7 +27,7 @@ import signal
 import yaml
 from keystoneclient.auth.identity import v2
 from novaclient.exceptions import NotFound
-from openstack import connection, profile
+#from openstack import connection, profile
 
 from xcloud import utils
 from xcloud.plugins import PluginManager
@@ -57,7 +57,7 @@ def _unpickle_method(func_name, obj, cls):
             break
     return func.__get__(obj, cls)
 
-pickle(MethodType, _pickle_method, _unpickle_method)
+copyreg.pickle(MethodType, _pickle_method, _unpickle_method)
 
 
 class Cloud(object):
@@ -132,7 +132,7 @@ class Cloud(object):
 
         return glance_client
 
-    def find_servers(self, role, cachable=False, filter=None):
+    def find_servers(self, role, cachable=False, filter=None, metadata={}):
         """
         Used to locate servers by role.
 
@@ -160,15 +160,16 @@ class Cloud(object):
 
         for server in servers:
             server_info = self.get_server_info(server, opt)
-            if filter:
-                if fnmatch(server_info.name, filter) or fnmatch(server_info.fqdn, filter):
-                    ret.append(server_info)
-            elif role:
-                if 'role' in server.metadata:
-                    if server_info.metadata['role'] == ns_role:
+            if utils.dict_match(server_info.metadata, metadata):
+                if filter:
+                    if fnmatch(server_info.name, filter) or fnmatch(server_info.fqdn, filter):
                         ret.append(server_info)
-            else:
-                ret.append(server_info)
+                elif role:
+                    if 'role' in server.metadata:
+                        if server_info.metadata['role'] == ns_role:
+                            ret.append(server_info)
+                else:
+                    ret.append(server_info)
 
         if cachable:
             self._find_servers_cache[ns_role] = ret
@@ -285,8 +286,8 @@ class Cloud(object):
             lambda x: x['port_id'] is None and x['floating_network_id'] == floating_network_id,
             all_ips)
         self._pool_ips = pool_ips = map(
-            lambda x: x['floating_ip_address'].encode('ascii', 'ignore'), pool_ips)
-        return pool_ips
+            lambda x: x['floating_ip_address'], pool_ips)
+        return list(pool_ips)
 
     def get_floating_ip_pool(self):
         networking = self._options.get('networking', {})
@@ -318,6 +319,7 @@ class Cloud(object):
             if 'fixed' in ip_pool:
                 fixed_ips = ip_pool['fixed']
                 for fixed_ip in fixed_ips:
+                    print(pool_ips)
                     if Cloud.to_ip(fixed_ip) in pool_ips:
                         fixed_ips.remove(fixed_ip)
                         return fixed_ip
@@ -348,7 +350,7 @@ class Cloud(object):
 
     def format_server_naming(self, server_naming):
         hash = hashlib.sha1()
-        hash.update(str(time.time()))
+        hash.update(str(time.time()).encode('utf-8'))
         md5_hash = hash.hexdigest()[:5]
         server_naming['shortname'] = self._options['shortname']
 
@@ -911,7 +913,8 @@ fi
 
         new_servers = []
         deleted_servers = []
-        servers = utils.retry(self.find_servers, options['name'])
+
+        servers = utils.retry(self.find_servers, options['name'], metadata=args.metadata)
 
         self.delete_errored_servers(servers)
 
@@ -1419,7 +1422,8 @@ fi
 
     def run_scripts(self, args):
         options = self._options
-        original_servers = self.find_servers(options['name'], filter=options.get('filter', None))
+        original_servers = self.find_servers(options['name'], filter=options.get('filter', None), \
+            metadata=args.metadata)
         server_list = re.split('[\n;, ]+', args.servers or '')
 
         servers = []
