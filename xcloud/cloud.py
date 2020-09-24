@@ -286,8 +286,8 @@ class Cloud(object):
             lambda x: x['port_id'] is None and x['floating_network_id'] == floating_network_id,
             all_ips)
         self._pool_ips = pool_ips = map(
-            lambda x: x['floating_ip_address'].encode('ascii', 'ignore'), pool_ips)
-        return pool_ips
+            lambda x: x['floating_ip_address'], pool_ips)
+        return list(pool_ips)
 
     def get_floating_ip_pool(self):
         networking = self._options.get('networking', {})
@@ -319,6 +319,7 @@ class Cloud(object):
             if 'fixed' in ip_pool:
                 fixed_ips = ip_pool['fixed']
                 for fixed_ip in fixed_ips:
+                    print(pool_ips)
                     if Cloud.to_ip(fixed_ip) in pool_ips:
                         fixed_ips.remove(fixed_ip)
                         return fixed_ip
