@@ -9,11 +9,11 @@ python-keystoneclient = "*"
 python-neutronclient = "*"
 python-novaclient = "==3.3.3"
 requests = "*"
-PyYAML = "==3.12"
+PyYAML = "*"
 "Jinja2" = "*"
 python-glanceclient = "*"
 
 [dev-packages]
 
 [requires]
-python_version = "2.7.14"
+python_version = "3.6.8"

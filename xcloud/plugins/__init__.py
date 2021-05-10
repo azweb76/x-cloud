@@ -47,3 +47,6 @@ class PluginManager(object):
 
     def on_describe(self, server, info):
         self.on_event('on_describe', server, info)
+    
+    def on_before_server_created(self, server, options):
+        self.on_event('on_before_server_created', server, options)
