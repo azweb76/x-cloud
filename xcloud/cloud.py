@@ -622,11 +622,14 @@ fi
 
         options = self._options
 
+        self._plugins.on_before_server_created(server_info, options)
+
         novaClient, neutronClient = Cloud.construct_nova_client(self._options)
         image_id = self.get_image().id
 
         server_naming = options.get('server_naming', {})
         server_name = self.format_server_naming(server_naming)
+
         user_data = self.get_userdata(server_info)
 
         security = options.get('security', {})
@@ -686,9 +689,10 @@ fi
         security_groups = security.get(
                         'security_groups', ['default'])
 
-        for group_name in security_groups:
-            log.info('verifying security group %s', group_name)
-            self.create_or_get_security_group(group_name)
+        self.update_security_groups()
+        # for group_name in security_groups:
+        #     log.info('verifying security group %s', group_name)
+        #     self.create_or_get_security_group(group_name)
 
         create_interval = utils.tdelta(options.get('server_retry_interval', '60s'))
         attempts = 0
@@ -808,7 +812,6 @@ fi
 
         neutronclient = Cloud.construct_neutron_client(self._options)
         security_groups = self._options.get('security_groups', {})
-        all_security_groups = self.get_security_groups()
 
         for security_group_name in security_groups:
             security_group = security_groups[security_group_name]
@@ -818,7 +821,7 @@ fi
 
             normalized_rules = []
             for rule in security_group:
-                remote_ip_prefix = rule['remote_ip_prefix']
+                remote_ip_prefix = rule.get('remote_ip_prefix', [None])
                 if isinstance(remote_ip_prefix, list):
                     for item in remote_ip_prefix:
                         normalized_rule = {
@@ -1353,7 +1356,7 @@ fi
             sudo = script.get('sudo', False)
             ssh_user = options.get('ssh_user', 'centos')
             cmd = utils.render(script['ssh'], server=server_info, env=options[
-                               'env'], cloud=self, configs=options['configs'])
+                               'env'], cloud=self, configs=options['configs'], options=options)
             exit_on_error = script.get('exit_on_error', True)
 
             log.info('executing ssh command on %s ...' % fqdn)
